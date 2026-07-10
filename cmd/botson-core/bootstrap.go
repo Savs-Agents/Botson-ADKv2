@@ -6,10 +6,10 @@ import (
 	"os"
 
 	"botson/internal/agent"
-	coreartifact "botson/internal/artifact"
+	coreartifact "botson/internal/storage/artifact"
 	"botson/internal/config"
 	"botson/internal/providers"
-	coresession "botson/internal/session"
+	coresession "botson/internal/storage/session"
 	"botson/internal/toolorder"
 	"botson/internal/tools"
 
