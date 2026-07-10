@@ -11,7 +11,7 @@ import (
 
 func TestRenderEvents_PlainText(t *testing.T) {
 	events := []adkwire.Event{
-		{Author: "chat:alice", Content: &genai.Content{Parts: []*genai.Part{{Text: "hi"}}}},
+		{Author: "chat-alice", Content: &genai.Content{Parts: []*genai.Part{{Text: "hi"}}}},
 		{Author: "Agent Botson", Content: &genai.Content{Parts: []*genai.Part{{Text: "hello there"}}}},
 	}
 
@@ -20,7 +20,7 @@ func TestRenderEvents_PlainText(t *testing.T) {
 	if pending != nil {
 		t.Fatalf("expected no pending confirmation, got %+v", pending)
 	}
-	want := []string{"chat:alice: hi", "Agent Botson: hello there"}
+	want := []string{"chat-alice: hi", "Agent Botson: hello there"}
 	if len(lines) != len(want) {
 		t.Fatalf("lines = %v, want %v", lines, want)
 	}

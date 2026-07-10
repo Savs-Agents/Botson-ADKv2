@@ -11,7 +11,7 @@ import (
 
 func readyModel(t *testing.T) model {
 	t.Helper()
-	m := newModel(context.Background(), newClient("http://example.invalid", "tok"), "Agent Botson", "chat:alice", "sess-1")
+	m := newModel(context.Background(), newClient("http://example.invalid", "tok"), "Agent Botson", "chat-alice", "sess-1")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	mm := updated.(model)
 	if !mm.ready {

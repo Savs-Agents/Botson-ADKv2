@@ -47,7 +47,13 @@ func Run(ctx context.Context, cfg *config.AppConfig, agentOverride string) error
 	}
 
 	sessionID := uuid.NewString()
-	userID := "chat:" + localUsername()
+	// "-" not ":" -- appName/userID/sessionID all get embedded literally as
+	// filesystem directory names by internal/storage/artifact's
+	// LocalFileService (getDir/getSessionDir), and ':' is a reserved
+	// character in Windows paths (drive-letter/ADS syntax), which broke a
+	// real Windows run with "The filename, directory name, or volume label
+	// syntax is incorrect" the first time this shipped with "chat:" here.
+	userID := "chat-" + localUsername()
 
 	if err := c.CreateSession(ctx, agent, userID, sessionID); err != nil {
 		return err

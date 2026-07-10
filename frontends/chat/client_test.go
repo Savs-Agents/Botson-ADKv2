@@ -83,14 +83,14 @@ func TestClient_CreateSession(t *testing.T) {
 	defer srv.Close()
 
 	c := newClient(srv.URL, testToken)
-	if err := c.CreateSession(context.Background(), "Agent Botson", "chat:alice", "sess-1"); err != nil {
+	if err := c.CreateSession(context.Background(), "Agent Botson", "chat-alice", "sess-1"); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
 	// r.URL.Path is the *decoded* path -- the space proves url.PathEscape
 	// correctly encoded "Agent Botson" on the wire and the server decoded
 	// it back, rather than the request breaking on the literal space.
-	const want = "/api/apps/Agent Botson/users/chat:alice/sessions/sess-1"
+	const want = "/api/apps/Agent Botson/users/chat-alice/sessions/sess-1"
 	if gotPath != want {
 		t.Errorf("path = %q, want %q", gotPath, want)
 	}
@@ -102,13 +102,13 @@ func TestClient_RunTurn(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
-		if req.AppName != "Agent Botson" || req.UserID != "chat:alice" || req.SessionID != "sess-1" {
+		if req.AppName != "Agent Botson" || req.UserID != "chat-alice" || req.SessionID != "sess-1" {
 			t.Errorf("unexpected request: %+v", req)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[
-			{"author":"chat:alice","content":{"role":"user","parts":[{"text":"hi"}]}},
+			{"author":"chat-alice","content":{"role":"user","parts":[{"text":"hi"}]}},
 			{"author":"Agent Botson","content":{"role":"model","parts":[{"text":"hello!"}]}}
 		]`))
 	}))
@@ -117,7 +117,7 @@ func TestClient_RunTurn(t *testing.T) {
 	c := newClient(srv.URL, testToken)
 	events, err := c.RunTurn(context.Background(), adkwire.RunAgentRequest{
 		AppName:   "Agent Botson",
-		UserID:    "chat:alice",
+		UserID:    "chat-alice",
 		SessionID: "sess-1",
 		NewMessage: genai.Content{
 			Role:  "user",
