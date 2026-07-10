@@ -2,10 +2,10 @@
 // NATS feature (e.g. publishing agent-run events for external subscribers
 // to consume). It is deliberately not wired into anything today -- nothing
 // in cmd/botson-core calls Connect, and no code publishes or subscribes to
-// any subject. Botson's actual API (internal/apiserver) is plain HTTP; this
-// package exists purely so the nats.go client dependency (kept on purpose
-// -- see go.mod) has one obvious, documented home instead of being an
-// unexplained stray import if/when it's actually used.
+// any subject. Botson's actual API (internal/networking/api) is plain
+// HTTP; this package exists purely so the nats.go client dependency (kept
+// on purpose -- see go.mod) has one obvious, documented home instead of
+// being an unexplained stray import if/when it's actually used.
 package natsclient
 
 import (

@@ -1,12 +1,13 @@
-// Package apiserver is Botson's single unified HTTP server: one
-// http.Server, bound to a configurable host:port, serving ADK's own
-// REST+A2A surface (reverse-proxied into an internally-run ADK backend via
-// internal/adkproxy) and Botson's own settings/agents/sessions/dashboard
-// routes (internal/botsonapi) side by side, both behind one bearer-token
-// auth middleware. This replaced the former NATS-based split
-// (internal/adkgateway fronting adk.* over NATS, internal/natsapi fronting
-// botson.* over NATS) in the 2026-07 move away from NATS as a transport.
-package apiserver
+// Package api is Botson's single unified HTTP server: one http.Server,
+// bound to a configurable host:port, serving ADK's own REST+A2A surface
+// (reverse-proxied into an internally-run ADK backend, see
+// adkbackend.go/adkreverseproxy.go) and Botson's own settings/agents/
+// sessions/dashboard routes (routes.go) side by side, both behind one
+// bearer-token auth middleware (auth.go). This replaced the former
+// NATS-based split (a NATS gateway fronting adk.* over NATS, a separate
+// NATS API fronting botson.* over NATS) in the 2026-07 move away from NATS
+// as a transport.
+package api
 
 import (
 	"context"
@@ -22,9 +23,6 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"google.golang.org/adk/v2/cmd/launcher"
-
-	"botson/internal/adkproxy"
-	"botson/internal/botsonapi"
 )
 
 // Config configures a Server.
@@ -38,7 +36,7 @@ type Config struct {
 	AuthToken string
 
 	// ADK is the ADK launcher configuration passed through to the
-	// internally-run ADK backend (internal/adkproxy). ADK.AgentLoader is
+	// internally-run ADK backend (adkbackend.go). ADK.AgentLoader is
 	// required.
 	ADK launcher.Config
 
@@ -51,7 +49,7 @@ type Config struct {
 	// RequestTimeout bounds how long the reverse proxy waits for the ADK
 	// backend to start responding to a forwarded request; defaults to 8
 	// minutes (real agent turns can run for minutes, not seconds -- see
-	// internal/adkproxy/backend.go's serverWriteTimeout doc comment).
+	// adkbackend.go's serverWriteTimeout doc comment).
 	RequestTimeout time.Duration
 
 	// Logger is used for diagnostics; defaults to slog.Default().
@@ -69,10 +67,10 @@ type Server struct {
 // New validates cfg and returns a Server ready to Run.
 func New(cfg Config) (*Server, error) {
 	if cfg.AuthToken == "" {
-		return nil, errors.New("apiserver: Config.AuthToken is required")
+		return nil, errors.New("api: Config.AuthToken is required")
 	}
 	if cfg.ADK.AgentLoader == nil {
-		return nil, errors.New("apiserver: Config.ADK.AgentLoader is required")
+		return nil, errors.New("api: Config.ADK.AgentLoader is required")
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -92,27 +90,27 @@ func (s *Server) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	backend, err := adkproxy.StartBackend(runCtx, s.cfg.ADK, s.cfg.BackendPort)
+	backend, err := StartBackend(runCtx, s.cfg.ADK, s.cfg.BackendPort)
 	if err != nil {
-		return fmt.Errorf("apiserver: start ADK backend: %w", err)
+		return fmt.Errorf("api: start ADK backend: %w", err)
 	}
 
-	proxyHandler, err := adkproxy.NewReverseProxy(backend.BaseURL(), s.cfg.RequestTimeout, s.cfg.Logger)
+	proxyHandler, err := NewReverseProxy(backend.BaseURL(), s.cfg.RequestTimeout, s.cfg.Logger)
 	if err != nil {
-		return fmt.Errorf("apiserver: configure ADK reverse proxy: %w", err)
+		return fmt.Errorf("api: configure ADK reverse proxy: %w", err)
 	}
 
 	router := mux.NewRouter()
 	router.PathPrefix("/api/").Handler(proxyHandler)
 	router.PathPrefix("/a2a/").Handler(proxyHandler)
 	router.Handle(a2asrv.WellKnownAgentCardPath, proxyHandler)
-	botsonapi.Mount(router, &s.cfg.ADK)
+	Mount(router, &s.cfg.ADK)
 
 	handler := authMiddleware(s.cfg.AuthToken, s.cfg.Logger)(router)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port))
 	if err != nil {
-		return fmt.Errorf("apiserver: listen on %s:%d: %w", s.cfg.Host, s.cfg.Port, err)
+		return fmt.Errorf("api: listen on %s:%d: %w", s.cfg.Host, s.cfg.Port, err)
 	}
 	s.setAddr(ln.Addr().String())
 	defer s.setAddr("")
@@ -137,15 +135,15 @@ func (s *Server) Run(ctx context.Context) error {
 		cancel()
 		<-backend.Done()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("apiserver: http server exited: %w", err)
+			return fmt.Errorf("api: http server exited: %w", err)
 		}
 		return nil
 	case <-backend.Done():
 		shutdown()
 		if err := backend.Err(); err != nil {
-			return fmt.Errorf("apiserver: backend exited unexpectedly: %w", err)
+			return fmt.Errorf("api: backend exited unexpectedly: %w", err)
 		}
-		return errors.New("apiserver: backend exited unexpectedly")
+		return errors.New("api: backend exited unexpectedly")
 	}
 }
 

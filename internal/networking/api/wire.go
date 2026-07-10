@@ -1,13 +1,8 @@
-// Package botsonapi is the REST surface for everything about running
-// Botson that isn't part of stock ADK's own REST/A2A surface -- that
-// surface is fronted separately by internal/adkproxy under /api and /a2a
-// (see internal/apiserver, which mounts both under one server). This
-// package's routes, all under /botson, cover settings, custom-agent CRUD,
-// and session/dashboard management -- the things every CLI subcommand used
-// to do by touching config.json/the session DB/~/.botson/agents directly,
-// and which used to live on NATS subjects (internal/natsapi) before the
-// 2026-07 move to a plain HTTP API.
-package botsonapi
+// The types below are the request/response wire shapes for the /botson/*
+// routes (routes.go). Those routes cover settings, custom-agent CRUD, and
+// session/dashboard management -- the things every CLI subcommand used to
+// do by touching config.json/the session DB/~/.botson/agents directly.
+package api
 
 import "botson/internal/config"
 

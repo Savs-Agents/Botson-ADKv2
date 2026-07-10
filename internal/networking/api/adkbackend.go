@@ -1,15 +1,9 @@
-// Package adkproxy runs a real Google ADK v2 REST+A2A server (via
-// google.golang.org/adk/v2/cmd/launcher/prod) internally and fronts it with
-// a plain HTTP reverse proxy (see proxy.go), so Botson's own unified HTTP
-// server (internal/apiserver) can expose ADK's stock REST/A2A surface
-// without reimplementing any of it by hand.
-//
-// This package used to run that same backend behind a NATS gateway instead
-// (hence its former name, internal/adkgateway) -- see AGENTS.md's history
-// notes for why that layer was dropped. The backend-launching half
-// (StartBackend, this file) is unchanged by that rework; only the
-// forwarding layer in front of it (proxy.go) is new.
-package adkproxy
+// StartBackend runs a real Google ADK v2 REST+A2A server (via
+// google.golang.org/adk/v2/cmd/launcher/prod) internally; adkreverseproxy.go
+// fronts it with a plain HTTP reverse proxy so this package's own Server
+// (server.go) can expose ADK's stock REST/A2A surface without
+// reimplementing any of it by hand.
+package api
 
 import (
 	"context"
@@ -64,11 +58,12 @@ type backend struct {
 // http.Server to ":<port>" -- all interfaces, not loopback-only -- and has
 // no flag or hook for restricting that or adding auth. This backend's port
 // is picked freely/never advertised, but it is not itself network-isolated
-// by ADK; internal/apiserver's bearer-token auth in front of the reverse
-// proxy (proxy.go) is what actually gates real traffic, not this bind
-// behavior. See docs/process-architecture.md for the accepted residual
-// risk this leaves (anything that can already reach the host machine can
-// still reach this backend's port directly, unauthenticated).
+// by ADK; this package's own bearer-token auth (auth.go) in front of the
+// reverse proxy (adkreverseproxy.go) is what actually gates real traffic,
+// not this bind behavior. See docs/process-architecture.md for the
+// accepted residual risk this leaves (anything that can already reach the
+// host machine can still reach this backend's port directly,
+// unauthenticated).
 //
 // The launcher keeps running until ctx is cancelled; callers are responsible
 // for cancelling ctx to shut it down.

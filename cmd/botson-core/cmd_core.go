@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"botson/internal/apiserver"
 	"botson/internal/automode"
 	"botson/internal/daemon"
+	"botson/internal/networking/api"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -21,13 +21,12 @@ const coreDisplayName = "Botson core"
 // newCoreCmd starts Botson's core: the only process that ever holds the
 // Gemini model, agent registry, and session/artifact services, and the
 // only thing any consumer -- a Discord bot, a web UI, anything -- ever
-// talks to. It's a single HTTP server (internal/apiserver) exposing ADK's
-// own REST/A2A surface (reverse-proxied into an internally-run ADK
-// backend, see internal/adkproxy) and Botson's own settings/agents/
-// sessions/dashboard routes (internal/botsonapi) side by side, both behind
-// one bearer-token auth middleware. There is no other interface in this
-// binary; nothing about this command dispatches to a TUI or any other
-// in-process consumer.
+// talks to. It's a single HTTP server (internal/networking/api) exposing
+// ADK's own REST/A2A surface (reverse-proxied into an internally-run ADK
+// backend) and Botson's own settings/agents/sessions/dashboard routes
+// side by side, both behind one bearer-token auth middleware. There is no
+// other interface in this binary; nothing about this command dispatches
+// to a TUI or any other in-process consumer.
 func newCoreCmd() *cobra.Command {
 	var host string
 	var port int
@@ -199,7 +198,7 @@ func runCoreServer(ctx context.Context, host string, port int, quiet bool) error
 		fmt.Printf("Provider: %s, model: %s\n", provider, boot.Config.ModelName)
 	}
 
-	srv, err := apiserver.New(apiserver.Config{
+	srv, err := api.New(api.Config{
 		Host:      host,
 		Port:      port,
 		AuthToken: boot.Config.ApiAuthToken,
@@ -207,8 +206,8 @@ func runCoreServer(ctx context.Context, host string, port int, quiet bool) error
 		// Give it real headroom above the longest normal tool call: a real
 		// agentic turn (many sequential tool calls, each its own model
 		// round trip) can run for minutes, not seconds -- see
-		// internal/adkproxy/backend.go's serverWriteTimeout doc comment
-		// for the matching fix on the local ADK REST server's own
+		// internal/networking/api/adkbackend.go's serverWriteTimeout doc
+		// comment for the matching fix on the local ADK REST server's own
 		// http.Server.WriteTimeout.
 		RequestTimeout: 8 * time.Minute,
 	})

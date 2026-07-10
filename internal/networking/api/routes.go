@@ -1,4 +1,4 @@
-package botsonapi
+package api
 
 import (
 	"encoding/json"

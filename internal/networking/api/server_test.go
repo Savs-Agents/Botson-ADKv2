@@ -1,9 +1,8 @@
-package apiserver
+package api
 
 import (
 	"context"
 	"encoding/json"
-	"iter"
 	"net/http"
 	"strings"
 	"testing"
@@ -16,51 +15,14 @@ import (
 	"google.golang.org/adk/v2/session"
 )
 
-// newEchoAgent returns a deterministic, no-LLM agent.Agent that echoes back
-// the caller's latest "user" message, so this test doesn't depend on a real
-// model backend or API key.
-func newEchoAgent(t *testing.T) agent.Agent {
-	t.Helper()
+// newEchoAgent and runAgentRequest are shared with adkbackend_test.go (same
+// package now).
 
-	a, err := agent.New(agent.Config{
-		Name:        "echo_agent",
-		Description: "test echo agent",
-		Run: func(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
-			return func(yield func(*session.Event, error) bool) {
-				text := "(no input)"
-				if sess := ctx.Session(); sess != nil {
-					for e := range sess.Events().All() {
-						if e.Author == "user" && e.Content != nil && len(e.Content.Parts) > 0 && e.Content.Parts[0].Text != "" {
-							text = e.Content.Parts[0].Text
-						}
-					}
-				}
-				ev := session.NewEvent(ctx, ctx.InvocationID())
-				ev.Author = ctx.Agent().Name()
-				ev.Content = genai.NewContentFromText("echo: "+text, genai.RoleModel)
-				yield(ev, nil)
-			}
-		},
-	})
-	if err != nil {
-		t.Fatalf("create echo agent: %v", err)
-	}
-	return a
-}
-
-type runAgentRequest struct {
-	AppName    string        `json:"appName"`
-	UserID     string        `json:"userId"`
-	SessionID  string        `json:"sessionId"`
-	NewMessage genai.Content `json:"newMessage"`
-}
-
-// TestServer_EndToEnd is the successor to the old adkgateway package's
-// TestGateway_EndToEnd, minus NATS entirely: it drives the whole composed
-// stack (auth middleware + ADK reverse proxy + botsonapi) over plain HTTP,
-// confirming both the ADK surface and Botson's own REST surface are
-// reachable through one authenticated server, and that an unauthenticated
-// request to either is rejected.
+// TestServer_EndToEnd drives the whole composed stack (auth middleware +
+// ADK reverse proxy + Botson's own routes) over plain HTTP, confirming
+// both the ADK surface and Botson's own REST surface are reachable
+// through one authenticated server, and that an unauthenticated request
+// to either is rejected.
 func TestServer_EndToEnd(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
