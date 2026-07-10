@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"botson/internal/tools"
+	"botson/internal/engine/tools"
 	"sort"
 
 	"google.golang.org/adk/v2/tool"
@@ -14,7 +14,7 @@ type toolBuilder func() (tool.Tool, error)
 
 // confirmationGated is the single source of truth for which registry tools
 // are built with RequireConfirmation: true. The tool configs below read from
-// it, and internal/toolorder consults it (via RequiresConfirmation) to know
+// it, and internal/engine/toolorder consults it (via RequiresConfirmation) to know
 // which calls will pause for HITL approval on their own versus need a
 // synthetic ordering confirmation -- keep the two in sync by construction,
 // not by hand.

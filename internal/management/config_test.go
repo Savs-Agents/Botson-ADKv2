@@ -3,7 +3,7 @@ package management
 import (
 	"testing"
 
-	"botson/internal/tools"
+	"botson/internal/engine/tools"
 )
 
 // TestUpdateSettings guards the two behaviors handleSettingsSet used to

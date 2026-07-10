@@ -28,7 +28,7 @@ type AppConfig struct {
 	// WorkspaceRoot is the default directory the file/command tools
 	// (listFiles, readFile, writeFile, editFile, runCommand) operate in
 	// when a session hasn't set its own "botson:cwd" state override --
-	// see internal/tools/workspace.go. Defaults to ~/.botson/workspace.
+	// see internal/engine/tools/workspace.go. Defaults to ~/.botson/workspace.
 	WorkspaceRoot string `json:"workspace_root"`
 
 	// Host and Port are the bind address of Botson's own HTTP API server
@@ -59,8 +59,8 @@ const MaskedSecret = "******"
 
 // Mask returns a copy of cfg with secret fields (the Gemini API key)
 // replaced by MaskedSecret, so it's safe to hand to a UI or an agent tool.
-// Lives here rather than in internal/management so internal/tools can use
-// it too without an import cycle (tools -> management -> agent -> tools).
+// Lives here rather than in internal/management so internal/engine/tools
+// can use it too without an import cycle (tools -> management -> agent -> tools).
 func Mask(cfg *AppConfig) AppConfig {
 	masked := *cfg
 	if masked.GeminiAPIKey != "" {

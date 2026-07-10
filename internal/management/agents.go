@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"botson/internal/agent"
+	"botson/internal/engine/agent"
 )
 
 var agentNameRegex = regexp.MustCompile(`^[a-zA-Z0-9_ -]+$`)
