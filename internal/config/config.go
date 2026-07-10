@@ -31,15 +31,25 @@ type AppConfig struct {
 	// see internal/tools/workspace.go. Defaults to ~/.botson/workspace.
 	WorkspaceRoot string `json:"workspace_root"`
 
-	// NatsAuthToken gates the embedded NATS server -- required on every
-	// connection once set (see cmd/botson-core/cmd_core.go). Generated
-	// once and never exposed via Mask()/botson.settings.get, since it's
-	// the credential that gates the very API that subject lives on.
-	// omitempty so Mask()'s blanked copy drops the key entirely from a
-	// botson.settings.get reply rather than showing an empty placeholder
-	// -- on disk it's never actually empty once generated, so this has no
-	// effect on the real config.json.
-	NatsAuthToken string `json:"nats_auth_token,omitempty"`
+	// Host and Port are the bind address of Botson's own HTTP API server
+	// (internal/apiserver) -- the primary interface any consumer talks to.
+	// Both are backfilled/persisted the same way WorkspaceRoot is, so a
+	// local process (e.g. a future TUI) can discover them by reading this
+	// file directly, the same way it already reads ApiAuthToken. A CLI
+	// flag on `botson core` can override either for a single run without
+	// touching these persisted defaults.
+	Host string `json:"host"`
+	Port int    `json:"port"`
+
+	// ApiAuthToken gates every request to the HTTP API server via a
+	// bearer token (see internal/apiserver's auth middleware) -- required
+	// on every request once set. Generated once and never exposed via
+	// Mask()/botson.settings.get, since it's the credential that gates the
+	// very API that reply travels over. omitempty so Mask()'s blanked copy
+	// drops the key entirely from a settings reply rather than showing an
+	// empty placeholder -- on disk it's never actually empty once
+	// generated, so this has no effect on the real config.json.
+	ApiAuthToken string `json:"api_auth_token,omitempty"`
 }
 
 // MaskedSecret is the placeholder Mask substitutes for secret fields, and
@@ -59,15 +69,15 @@ func Mask(cfg *AppConfig) AppConfig {
 	if masked.OpenRouterAPIKey != "" {
 		masked.OpenRouterAPIKey = MaskedSecret
 	}
-	masked.NatsAuthToken = ""
+	masked.ApiAuthToken = ""
 	return masked
 }
 
-// generateToken returns a random hex token used as NatsAuthToken.
+// generateToken returns a random hex token used as ApiAuthToken.
 func generateToken() (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("failed to generate NATS auth token: %w", err)
+		return "", fmt.Errorf("failed to generate API auth token: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }
@@ -123,7 +133,7 @@ func loadLocked() (*AppConfig, error) {
 				RootAgent: "Agent Botson",
 				Provider:  "gemini",
 			}
-			if _, err := fillWorkspaceAndToken(defaultCfg); err != nil {
+			if _, err := fillDefaults(defaultCfg); err != nil {
 				return nil, err
 			}
 			// Bootstrap the config file so it physically exists
@@ -147,13 +157,13 @@ func loadLocked() (*AppConfig, error) {
 		cfg.Provider = "gemini"
 	}
 
-	// Unlike ModelName above, WorkspaceRoot/NatsAuthToken must be persisted
-	// to disk immediately once backfilled, not just fixed up in memory --
-	// NatsAuthToken in particular is read directly off disk by other
-	// processes (e.g. Botson-TUI pairing with a local core), so a value
-	// that only exists in this process until some unrelated Save/Update
-	// call is not good enough.
-	dirty, err := fillWorkspaceAndToken(&cfg)
+	// Unlike ModelName above, WorkspaceRoot/Host/Port/ApiAuthToken must be
+	// persisted to disk immediately once backfilled, not just fixed up in
+	// memory -- ApiAuthToken in particular is read directly off disk by
+	// other processes (e.g. Botson-TUI pairing with a local core), so a
+	// value that only exists in this process until some unrelated
+	// Save/Update call is not good enough.
+	dirty, err := fillDefaults(&cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -230,10 +240,10 @@ func GetDataDir() (string, error) {
 	return dataDir, nil
 }
 
-// fillWorkspaceAndToken backfills WorkspaceRoot and NatsAuthToken on cfg if
-// either is empty, reporting whether it changed anything so the caller
-// knows to persist the result.
-func fillWorkspaceAndToken(cfg *AppConfig) (dirty bool, err error) {
+// fillDefaults backfills WorkspaceRoot, Host, Port, and ApiAuthToken on cfg
+// wherever they're unset (WorkspaceRoot/Host empty, Port zero), reporting
+// whether it changed anything so the caller knows to persist the result.
+func fillDefaults(cfg *AppConfig) (dirty bool, err error) {
 	if cfg.WorkspaceRoot == "" {
 		dataDir, err := GetDataDir()
 		if err != nil {
@@ -243,12 +253,22 @@ func fillWorkspaceAndToken(cfg *AppConfig) (dirty bool, err error) {
 		dirty = true
 	}
 
-	if cfg.NatsAuthToken == "" {
+	if cfg.Host == "" {
+		cfg.Host = "127.0.0.1"
+		dirty = true
+	}
+
+	if cfg.Port == 0 {
+		cfg.Port = 4222
+		dirty = true
+	}
+
+	if cfg.ApiAuthToken == "" {
 		token, err := generateToken()
 		if err != nil {
 			return false, err
 		}
-		cfg.NatsAuthToken = token
+		cfg.ApiAuthToken = token
 		dirty = true
 	}
 

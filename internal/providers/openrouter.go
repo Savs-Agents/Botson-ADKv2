@@ -44,11 +44,10 @@ func (m *openRouterModel) Name() string {
 }
 
 // GenerateContent always performs a single blocking HTTP call and yields
-// one response, regardless of the stream flag -- Botson's NATS
-// request/reply transport never requests SSE streaming today (see
-// internal/natsapi's package doc: "none of it needs streaming"), so
-// there's nothing to stream to. If stream=true is ever requested this
-// still behaves correctly, just as one non-partial chunk instead of
+// one response, regardless of the stream flag -- nothing in Botson's own
+// REST API (internal/apiserver, internal/botsonapi) requests SSE streaming
+// today, so there's nothing to stream to. If stream=true is ever requested
+// this still behaves correctly, just as one non-partial chunk instead of
 // several partial ones.
 func (m *openRouterModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
