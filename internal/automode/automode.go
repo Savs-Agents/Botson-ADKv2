@@ -33,8 +33,10 @@ import (
 	"google.golang.org/adk/v2/cmd/launcher"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
+	"google.golang.org/genai"
 
 	"botson/internal/management"
+	"botson/internal/networking/adkwire"
 )
 
 // pollInterval bounds how long a pending confirmation can sit unanswered
@@ -198,43 +200,15 @@ func pendingConfirmations(sess session.Session) []string {
 	return pending
 }
 
-// The types below mirror the JSON shapes ADK's REST API actually expects on
-// POST /api/run (see google.golang.org/adk/v2/server/adkrest, whose own
-// request/response models live under an internal/ package this module can't
-// import across module boundaries) -- verified against Botson-TUI's own
-// hand-rolled mirror, itself checked against a real persisted session. Kept
-// minimal: only the fields this package actually sends.
-type runAgentRequest struct {
-	AppName    string      `json:"appName"`
-	UserID     string      `json:"userId"`
-	SessionID  string      `json:"sessionId"`
-	NewMessage wireContent `json:"newMessage"`
-}
-
-type wireContent struct {
-	Role  string     `json:"role,omitempty"`
-	Parts []wirePart `json:"parts"`
-}
-
-type wirePart struct {
-	FunctionResponse *wireFunctionResponse `json:"functionResponse,omitempty"`
-}
-
-type wireFunctionResponse struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Response map[string]any `json:"response,omitempty"`
-}
-
 // autoApprove sends one run turn answering every pending confirmation id at
 // once (ADK expects a batch answered together -- see AGENTS.md), marking
 // each response with botsonAutoMode so any client rendering this session's
 // history later can tell this apart from a human's own approval.
 func (w *worker) autoApprove(ctx context.Context, sess session.Session, pending []string) error {
-	parts := make([]wirePart, 0, len(pending))
+	parts := make([]*genai.Part, 0, len(pending))
 	for _, id := range pending {
-		parts = append(parts, wirePart{
-			FunctionResponse: &wireFunctionResponse{
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
 				ID:   id,
 				Name: toolconfirmation.FunctionCallName,
 				Response: map[string]any{
@@ -245,11 +219,11 @@ func (w *worker) autoApprove(ctx context.Context, sess session.Session, pending 
 		})
 	}
 
-	body, err := json.Marshal(runAgentRequest{
+	body, err := json.Marshal(adkwire.RunAgentRequest{
 		AppName:    sess.AppName(),
 		UserID:     sess.UserID(),
 		SessionID:  sess.ID(),
-		NewMessage: wireContent{Role: "user", Parts: parts},
+		NewMessage: genai.Content{Role: "user", Parts: parts},
 	})
 	if err != nil {
 		return err
