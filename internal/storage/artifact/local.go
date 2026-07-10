@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,14 +32,103 @@ func NewLocalFileService(baseDir string) (*LocalFileService, error) {
 	return &LocalFileService{baseDir: artifactsDir}, nil
 }
 
+// invalidSegmentChars matches anything unsafe to embed literally as one
+// filesystem path component on any platform Botson supports: path
+// separators (both / and \, rejected even on non-Windows so behavior
+// doesn't silently differ by OS), Windows-reserved characters
+// (< > : " | ? *, e.g. a bare ':' broke a real Windows run with "The
+// filename, directory name, or volume label syntax is incorrect"), and
+// control characters.
+var invalidSegmentChars = regexp.MustCompile(`[/\\<>:"|?*\x00-\x1f]`)
+
+// namedSegment pairs a path component with the field name it came from,
+// purely so sanitizeSegments can report which one was invalid.
+type namedSegment struct {
+	field string
+	value string
+}
+
+// sanitizeSegments validates each segment in order (so the error a caller
+// sees for a multi-field-invalid request is deterministic, not dependent
+// on map iteration order) -- see sanitizeSegment for what "valid" means
+// and why this exists.
+func sanitizeSegments(segments ...namedSegment) error {
+	for _, s := range segments {
+		if err := sanitizeSegment(s.field, s.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sanitizeSegment validates that name is safe to use as a single
+// filesystem path component. AppName/UserID/SessionID/FileName all flow
+// here from artifact.Request values that ultimately originate from a REST
+// caller (userId/sessionId on POST /api/run) or, for FileName, directly
+// from an LLM's saveArtifact tool call -- none of that is sanitized
+// upstream (google.golang.org/adk/v2/artifact's own Request.Validate only
+// checks for missing fields, confirmed by reading its source), so this is
+// the one place that needs to catch both cross-platform-unsafe characters
+// and path traversal ("..") before anything reaches the filesystem.
+// Mirrors the same class of check internal/engine/tools/workspace.go's
+// resolveWorkspacePath applies to the file/command tools' own workspace
+// sandbox.
+func sanitizeSegment(field, name string) error {
+	if name == "" {
+		return fmt.Errorf("artifact: %s must not be empty", field)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("artifact: %s must not be %q", field, name)
+	}
+	if invalidSegmentChars.MatchString(name) {
+		return fmt.Errorf("artifact: %s contains a character that isn't safe in a file path: %q", field, name)
+	}
+	return nil
+}
+
+// confineToBase is a defense-in-depth check confirming dir (built from
+// already-sanitized segments) still resolves inside s.baseDir -- the
+// character-level checks in sanitizeSegment should make this unreachable
+// in practice (no segment can contain a separator or ".."), but this is
+// the same belt-and-suspenders containment check
+// internal/engine/tools/workspace.go's resolveWorkspacePath applies, kept
+// here for the same reason: a future bug in the character-level check
+// shouldn't be the only thing standing between a bad segment and writing
+// outside the artifacts directory.
+func (s *LocalFileService) confineToBase(dir string) (string, error) {
+	baseWithSep := s.baseDir
+	if !strings.HasSuffix(baseWithSep, string(filepath.Separator)) {
+		baseWithSep += string(filepath.Separator)
+	}
+	if dir != s.baseDir && !strings.HasPrefix(dir, baseWithSep) {
+		return "", fmt.Errorf("artifact: resolved path escapes the artifacts directory")
+	}
+	return dir, nil
+}
+
 // getDir returns the absolute folder path for a specific artifact.
-func (s *LocalFileService) getDir(appName, userID, sessionID, fileName string) string {
-	return filepath.Join(s.baseDir, appName, userID, sessionID, fileName)
+func (s *LocalFileService) getDir(appName, userID, sessionID, fileName string) (string, error) {
+	if err := sanitizeSegments(
+		namedSegment{"appName", appName},
+		namedSegment{"userID", userID},
+		namedSegment{"sessionID", sessionID},
+		namedSegment{"fileName", fileName},
+	); err != nil {
+		return "", err
+	}
+	return s.confineToBase(filepath.Join(s.baseDir, appName, userID, sessionID, fileName))
 }
 
 // getSessionDir returns the folder path containing all artifacts in a session.
-func (s *LocalFileService) getSessionDir(appName, userID, sessionID string) string {
-	return filepath.Join(s.baseDir, appName, userID, sessionID)
+func (s *LocalFileService) getSessionDir(appName, userID, sessionID string) (string, error) {
+	if err := sanitizeSegments(
+		namedSegment{"appName", appName},
+		namedSegment{"userID", userID},
+		namedSegment{"sessionID", sessionID},
+	); err != nil {
+		return "", err
+	}
+	return s.confineToBase(filepath.Join(s.baseDir, appName, userID, sessionID))
 }
 
 // getLatestVersion scans the directory to find the highest version number.
@@ -76,7 +166,10 @@ func (s *LocalFileService) Save(ctx context.Context, req *artifact.SaveRequest) 
 		return nil, err
 	}
 
-	dir := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	dir, err := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create version directory: %w", err)
 	}
@@ -133,7 +226,10 @@ func (s *LocalFileService) Load(ctx context.Context, req *artifact.LoadRequest) 
 		return nil, err
 	}
 
-	dir := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	dir, err := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	if err != nil {
+		return nil, err
+	}
 	version := req.Version
 	if version == 0 {
 		latest, err := s.getLatestVersion(dir)
@@ -170,7 +266,10 @@ func (s *LocalFileService) Delete(ctx context.Context, req *artifact.DeleteReque
 		return err
 	}
 
-	dir := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	dir, err := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	if err != nil {
+		return err
+	}
 	if req.Version != 0 {
 		// Delete specific version files
 		dataPath := filepath.Join(dir, fmt.Sprintf("%d.data", req.Version))
@@ -192,7 +291,10 @@ func (s *LocalFileService) List(ctx context.Context, req *artifact.ListRequest) 
 		return nil, err
 	}
 
-	sessionDir := s.getSessionDir(req.AppName, req.UserID, req.SessionID)
+	sessionDir, err := s.getSessionDir(req.AppName, req.UserID, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(sessionDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -221,7 +323,10 @@ func (s *LocalFileService) Versions(ctx context.Context, req *artifact.VersionsR
 		return nil, err
 	}
 
-	dir := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	dir, err := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -261,7 +366,10 @@ func (s *LocalFileService) GetArtifactVersion(ctx context.Context, req *artifact
 		return nil, err
 	}
 
-	dir := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	dir, err := s.getDir(req.AppName, req.UserID, req.SessionID, req.FileName)
+	if err != nil {
+		return nil, err
+	}
 	version := req.Version
 	if version == 0 {
 		latest, err := s.getLatestVersion(dir)
