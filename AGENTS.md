@@ -9,13 +9,13 @@ Botson is a Go-based agent framework built on Google's **ADK v2**. As of 2026-07
 ## Project structure
 
 - **`/cmd`**: application entry points. `botson-core` is the only one.
-  - **[`/botson-core`](./cmd/botson-core/)**: the primary application (ships as `botson-<os>-<arch>`) — a small Cobra CLI with exactly two subcommands: `core` (the service itself, plus `start`/`stop`/`status`) and `setup install` (writes the initial `config.json`). Nothing else lives in this binary.
+  - **[`/botson-core`](./cmd/botson-core/)**: the primary application (ships as `botson-<os>-<arch>`) — a small Cobra CLI with exactly two subcommands: `core` (the service itself, plus `start`/`stop`/`status`) and `update` (a stub, not yet implemented). Nothing else lives in this binary.
 - **`/internal`**: main application packages.
   - **[`/agent`](./internal/agent/)**: custom recursive agent loader, default definitions, and tool registry.
   - **[`/artifact`](./internal/artifact/)**: local file system service for persistent artifacts.
   - **[`/config`](./internal/config/)**: `AppConfig` struct, load/save/update, and data-dir lookups (`~/.botson/`). `Load` caches a single shared instance per process and `Update` mutates it in place (see "Self-configuration" below) — this is the one package every settings-reading/writing code path ultimately goes through, so it can't import `internal/management`, `internal/agent`, or `internal/tools` without creating a cycle.
   - **[`/daemon`](./internal/daemon/)**: generic detach/control lifecycle (start/stop/status, PID files, the loopback control channel) for `core start`/`stop`/`status`.
-  - **[`/setup`](./internal/setup/)**: backs `botson setup install` — the one local, direct-to-disk bootstrap step (Gemini API key, model, root agent), needed before any core or NATS server exists for a client to configure that over instead.
+  - **[`/update`](./internal/update/)**: framework for a future `botson update` (check for and apply a newer release in place) — currently just a stub returning `update.ErrNotImplemented`. There is no dedicated install/config command right now; see "First-run setup" below.
   - **[`/natsapi`](./internal/natsapi/)**: the server side of Botson's own NATS API — the `botson.*` subjects covering settings, custom-agent CRUD, and dashboard-shaped session listing/inspection. See `subjects.go` for the full subject table. The standard ADK surface (list-apps, sessions, running a turn, A2A) is a separate namespace, `adk.*`, fronted by `internal/adkgateway`; see "Unified core architecture" below.
   - **[`/adkgateway`](./internal/adkgateway/)**: spins up a real ADK REST server (`google.golang.org/adk/v2/cmd/launcher/prod`) on a loopback port and reverse-proxies `adk.*` NATS traffic to it, so REST/A2A behavior always matches upstream ADK exactly. Moved in from the sibling [`NATS-ADK-Proxy`](https://github.com/Savs-Agents/NATS-ADK-Proxy) repo, which only ever had this one consumer — that repo now just holds the wire `protocol` and a thin `client` package, both still used cross-repo (this package's `backend.go` sets the local ADK server's write/idle timeouts; see its doc comment for why the defaults are dangerous for a real multi-tool-call turn).
   - **[`/management`](./internal/management/)**: shared, interface-agnostic business logic (agents, sessions, config, dashboard) — the functions `internal/natsapi`'s handlers call. `ListSessions`/`GetSession`/`DeleteSession` (`sessions.go`) only need a `session.Service`, not the full Gemini/agent-loader bootstrap.
@@ -35,7 +35,7 @@ Botson is a Go-based agent framework built on Google's **ADK v2**. As of 2026-07
 
 See [docs/process-architecture.md](./docs/process-architecture.md) for the full deep dive (process inventory, discovery mechanics, lifecycle diagrams, and known limitations) — this section is the condensed version.
 
-Historically, `botson tui`, `botson web`, and `botson discord` were three fully independent OS processes, each running its own copy of `setupApp()`'s bootstrap (Gemini model, agent registry, session service) with no in-memory sharing. A 2026-07 redesign fixed that: one core process holds the state, first over HTTP, then over **NATS** — the core exposes exactly one API surface, not an ADK/HTTP-specific mechanism, so a Discord bot or web console can be built as a fully independent project needing only a NATS client. That redesign still shipped a TUI built into this same binary, including a fallback where it would silently become its own private, unregistered core if none was running. A later revision (this one) removed that: **there is no TUI, no tray, and no code path in this binary that runs a second copy of the agent runtime.** `botson` ships exactly `core` and `setup install`.
+Historically, `botson tui`, `botson web`, and `botson discord` were three fully independent OS processes, each running its own copy of `setupApp()`'s bootstrap (Gemini model, agent registry, session service) with no in-memory sharing. A 2026-07 redesign fixed that: one core process holds the state, first over HTTP, then over **NATS** — the core exposes exactly one API surface, not an ADK/HTTP-specific mechanism, so a Discord bot or web console can be built as a fully independent project needing only a NATS client. That redesign still shipped a TUI built into this same binary, including a fallback where it would silently become its own private, unregistered core if none was running. A later revision (this one) removed that: **there is no TUI, no tray, and no code path in this binary that runs a second copy of the agent runtime.** `botson` ships exactly `core` and a not-yet-implemented `update` stub.
 
 - **The core is `botson core`** (`cmd/botson-core/cmd_core.go`). `runCore` registers daemon state (`daemon.WriteState`, the loopback control channel) and calls `runCoreServer`, which does the actual work: start an embedded `*server.Server` (`nats-server/v2/server`) on a loopback port, wait for it to be ready, connect a `*nats.Conn` to it, then run two things concurrently against that connection via `errgroup` until `ctx` is cancelled: `adkproxy.New(...).Run(ctx)` (the imported NATS-ADK-Proxy, serving `adk.*`) and `natsapi.Serve(ctx, nc, boot.Launcher)` (serving `botson.*`). `runCore` always registers, regardless of how the process was launched — directly (`botson core`), detached (`core start`), or under an external supervisor like systemd.
 - **Why two subject namespaces instead of one.** `adk.*` needs to match upstream ADK's REST/A2A behavior exactly (route set, CORS, telemetry, session semantics) — reimplementing that by hand (as the old `internal/interface/natscore` did, for a small subset: `agent.default`/`session.create`/`session.get`/`run`) means it can silently drift from what ADK itself does. Importing NATS-ADK-Proxy instead means Botson gets that surface for free, verified against the real `prod` launcher. `botson.*` is for the genuinely Botson-specific state (settings, custom-agent CRUD, dashboard aggregation) that was never part of ADK's own API and has to be hand-rolled somewhere regardless — `internal/natsapi` is that somewhere, mechanically wrapping `internal/management`/`internal/config` calls that used to be CLI-only.
@@ -46,7 +46,7 @@ Historically, `botson tui`, `botson web`, and `botson discord` were three fully 
 
 `internal/config.Load()` returns a single cached `*AppConfig` per process (not a fresh read each call), and `internal/config.Update(mutate func(*AppConfig))` edits that cached instance's fields **in place** before persisting to disk, rather than building a new struct and swapping the pointer. That means every long-lived holder of the config pointer within the core process (`cmd/botson-core`'s `appBoot.Config`) sees an `Update` immediately, with no restart needed. `botson.settings.set` (`internal/natsapi`) goes through `config.Update` for this reason — see `internal/config/config_test.go` for the regression test guarding this specifically (it would be easy to "simplify" `Update` back into load-then-replace and silently break this).
 
-This is what makes the `updateSettings` agent tool (`internal/tools/update_settings.go`) meaningful: the running agent can change its own model/root-agent mid-conversation and have it actually take effect for the rest of that process's life, not just on next launch. It deliberately excludes secrets (the Gemini API key) — that stays human-controlled via `botson.settings.set` (or `setup install`), so a confused or compromised agent can't rotate or wipe its own credentials. `RequireConfirmation: true` is set on its registry entry (`internal/agent/registry.go`), same as `saveArtifact`, so it still pauses for a HITL approval before taking effect.
+This is what makes the `updateSettings` agent tool (`internal/tools/update_settings.go`) meaningful: the running agent can change its own model/root-agent mid-conversation and have it actually take effect for the rest of that process's life, not just on next launch. It deliberately excludes secrets (the Gemini API key) — that stays human-controlled via `botson.settings.set` (or hand-editing `config.json`), so a confused or compromised agent can't rotate or wipe its own credentials. `RequireConfirmation: true` is set on its registry entry (`internal/agent/registry.go`), same as `saveArtifact`, so it still pauses for a HITL approval before taking effect.
 
 ## Coding/exec tools
 
@@ -92,23 +92,7 @@ go run scripts/build_linux.go     # Linux
 
 ### First-run setup
 
-```bash
-botson setup install
-```
-Interactive wizard: Gemini API key, then root agent (validated against `management.ListAgents()`, which needs no model/API key). Re-running later detects an existing config and asks before overwriting, so it doubles as a repair step. This is the *only* local, direct-to-disk configuration path — it exists solely because it has to run before any core/NATS server does. Everything else about running Botson (settings, agents, sessions) is a NATS subject; see `internal/natsapi/subjects.go`.
-
-**Scripted / non-interactive install** (for agents or automated setup — added so this can be driven without a terminal attached for prompts):
-```bash
-botson setup install --non-interactive --gemini-api-key "KEY" [flags...]
-```
-| Flag | Notes |
-|---|---|
-| `--non-interactive` | required to activate flag-driven mode at all |
-| `--gemini-api-key` | required on a first-ever install; keeps the existing key if omitted on a re-run |
-| `--model` | default `gemini-3.1-flash-lite` |
-| `--root-agent` | default `Agent Botson` |
-
-Any flag left unset falls back to whatever's already in `config.json` (or a built-in default on a brand-new install) rather than prompting — see `internal/setup/install.go`'s `InstallOptions`/`applyInstallOptions` for the exact precedence.
+There's no dedicated install/config command right now (`internal/setup` was removed; a replacement is planned, with `internal/update`'s stub as the landing spot for CLI-driven maintenance tasks going forward). `config.Load()` (`internal/config/config.go`) bootstraps `~/.botson/config.json` on first read regardless of how it's triggered — e.g. by just running `botson core` — filling in a generated `workspace_root` and `nats_auth_token`, a default `model_name`/`root_agent`, but a blank `gemini_api_key`. Fill that in by hand-editing the file, or via `botson.settings.set` on an already-running core (see "Configuration reference" below), then (re)start the core.
 
 ### Running the core
 
@@ -122,7 +106,7 @@ Logs: `~/.botson/logs/core.log`. State: `~/.botson/core.pid`. Since Windows has 
 
 ### Everything else is a NATS subject, not a CLI command
 
-Settings, custom-agent CRUD, and session/dashboard management are all `botson.*` subjects (`internal/natsapi`) — see that package's `subjects.go` for the full table, or [docs/sessions.md](./docs/sessions.md) for the session-specific ones. Creating/running/inspecting a session mid-conversation, or listing available apps, goes through `adk.*` (the imported NATS-ADK-Proxy) — see that package's README for its wire contract. There is no CLI equivalent for any of this anymore; a raw NATS client (or a short Go scratch script using `nats.go` directly) is the only way to exercise it outside of building a full consumer project. **See [docs/nats-api.md](./docs/nats-api.md) for the full consumer-facing reference** — every subject, request/reply shape, and a worked example.
+Settings, custom-agent CRUD, and session/dashboard management are all `botson.*` subjects (`internal/natsapi`) — see that package's `subjects.go` for the full table, or [docs/sessions.md](./docs/sessions.md) for the session-specific ones. Creating/running/inspecting a session mid-conversation, or listing available apps, goes through `adk.*` (`internal/adkgateway`) — see the sibling NATS-ADK-Proxy repo's README for its wire contract. There is no CLI equivalent for any of this anymore; a raw NATS client (or a short Go scratch script using `nats.go` directly) is the only way to exercise it outside of building a full consumer project. **See [docs/nats-api.md](./docs/nats-api.md) for the full consumer-facing reference** — every subject, request/reply shape, and a worked example.
 
 ## Configuration reference
 
@@ -158,7 +142,7 @@ a session can override it per-session via `stateDelta` on `/api/run` (see
 [docs/nats-api.md](./docs/nats-api.md#setting-a-sessions-working-directory)),
 to any absolute path — not sandboxed, unlike `workspace_root` itself.
 
-Read/write this file through `botson setup install`, the `botson.settings.set` NATS subject, or the `updateSettings` tool rather than hand-editing while a `botson core` process is running, so the in-memory copy that process is holding doesn't drift from disk — see "Self-configuration" above.
+Prefer the `botson.settings.set` NATS subject or the `updateSettings` tool over hand-editing this file while a `botson core` process is running, so the in-memory copy that process is holding doesn't drift from disk — see "Self-configuration" above. Hand-editing is fine when no core is running (e.g. the very first edit, to add `gemini_api_key`).
 
 ## Dependencies
 
@@ -169,13 +153,12 @@ Prefer the standard library where it can reasonably do the job; the project lean
 - `github.com/nats-io/nats.go` + `github.com/nats-io/nats-server/v2` — the core's NATS transport: `nats.go` is the client both `adk.*` and `botson.*` use, `nats-server/v2` is embedded in-process by `botson core` so it stays a single binary with no external NATS server to run
 - `github.com/Savs-Agents/NATS-ADK-Proxy/client` — a thin, optional NATS client for `internal/automode`'s own in-process calls back into this core's `adk.*` surface; the gateway/backend that actually serves `adk.*` lives here, in `internal/adkgateway` (moved in from that sibling repo, whose scope is now just the wire protocol + this client)
 - `github.com/spf13/cobra` — CLI command/flag framework powering `botson`'s two subcommands
-- `golang.org/x/term` — masked (password-style) terminal input for `setup install` prompts
 - `golang.org/x/sync` (`errgroup`) — runs `adk.*` and `botson.*` concurrently under one cancellable context in `runCoreServer`
 - `gorm.io/gorm` (+ `glebarez/sqlite`) — ORM/SQLite backing session persistence
 
 ## Conventions
 
 - Commit messages follow Conventional Commits style: `feat:`, `fix:`, `refactor:`, etc., imperative mood, no trailing period.
-- Prefer adding a flag with a sensible default over introducing a new prompt, when a feature needs to be scriptable (see `--non-interactive` on `setup install`).
-- Cobra commands that only manage a background process's lifecycle (not the agent runtime) set `PersistentPreRunE: noBootstrap` to skip the expensive config/Gemini/agent/session bootstrap — see `newCoreStartCmd`, `newCoreStopCmd`, `newSetupCmd`.
+- Prefer adding a flag with a sensible default over introducing a new prompt, when a feature needs to be scriptable.
+- Cobra commands that only manage a background process's lifecycle (not the agent runtime) set `PersistentPreRunE: noBootstrap` to skip the expensive config/Gemini/agent/session bootstrap — see `newCoreStartCmd`, `newCoreStopCmd`, `newUpdateCmd`.
 - Import direction: `cmd/botson-core` → `internal/natsapi` → `internal/management` → `internal/agent` → `internal/tools` → `internal/config`. `internal/tools` must never import `internal/management` or `internal/agent` (it would cycle back through `internal/agent`'s import of `internal/tools`) — shared logic those layers both need (e.g. `Mask`) belongs in `internal/config` instead, not `internal/management`.

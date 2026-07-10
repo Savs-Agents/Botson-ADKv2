@@ -97,7 +97,7 @@ way (§4).
 |---|---|---|---|
 | `botson core` | The core. Embedded NATS server + `adk.*`/`botson.*` subject handlers. | Yes -- the only one that does. | Yes, via `~/.botson/core.pid` (always, regardless of how it was launched). |
 | `botson core start` / `stop` / `status` | Lifecycle wrapper: launches `botson core` as a detached background process, or asks a running one to stop / reports on it. | No (separate short-lived CLI invocation). | N/A -- manages the discoverable state above. |
-| `botson setup install` | Writes `~/.botson/config.json` (Gemini API key, model, root agent). The one thing that has to stay local/direct-to-disk, since it must work before any core or NATS server exists. | No. | No. |
+| `botson update` | Stub, not yet implemented (`internal/update`). | No. | No. |
 
 ---
 
@@ -220,8 +220,8 @@ Every tool the agent runs (`readFile`, `writeFile`, `runCommand`, etc.)
 resolves paths against a **configured workspace root**, not the core
 process's `os.Getwd()` -- `AppConfig.WorkspaceRoot`
 (`internal/config/config.go`), defaulting to `~/.botson/workspace` and
-settable via `setup install` or the `botson.settings.set` NATS subject
-(`workspaceRoot`, applies immediately, no restart needed). This is
+settable by hand-editing `config.json` or via the `botson.settings.set`
+NATS subject (`workspaceRoot`, applies immediately, no restart needed). This is
 independent of how or where the core process was launched, unlike the
 launch-time-`os.Getwd()` behavior this replaced.
 

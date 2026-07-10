@@ -27,10 +27,9 @@ func main() {
 		Use:   "botson",
 		Short: "Botson: a NATS-only AI agent service",
 		Long: "Botson's core is the one process that ever holds the Gemini model,\n" +
-			"agent registry, and session/artifact state. Run `botson setup install`\n" +
-			"once to configure it, then `botson core start` -- every consumer from\n" +
-			"then on (a Discord bot, a web UI, anything) talks to it purely over\n" +
-			"NATS, never through this CLI.",
+			"agent registry, and session/artifact state. Once configured, run\n" +
+			"`botson core start` -- every consumer from then on (a Discord bot,\n" +
+			"a web UI, anything) talks to it purely over NATS, never through this CLI.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -43,7 +42,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(newCoreCmd(), newSetupCmd())
+	rootCmd.AddCommand(newCoreCmd(), newUpdateCmd())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)

@@ -9,7 +9,6 @@ require (
 	github.com/nats-io/nats.go v1.52.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.21.0
-	golang.org/x/term v0.44.0
 	google.golang.org/adk/v2 v2.0.0
 	google.golang.org/genai v1.62.0
 	gorm.io/gorm v1.31.2

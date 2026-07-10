@@ -24,24 +24,28 @@ go run scripts/build_linux.go     # or build_windows.go on Windows
 This produces `bin/botson-<os>-<arch>`.
 
 **2. Configure**
+
+There's no dedicated install/config command right now (a replacement is planned — see `internal/update`'s stub for where CLI-driven maintenance tasks will land). Running the core once bootstraps `~/.botson/config.json` with a generated workspace directory and NATS auth token, but an empty API key:
+
 ```bash
-./bin/botson-linux-amd64 setup install
+botson core start   # creates ~/.botson/config.json with a blank API key
 ```
-An interactive wizard asks for your Gemini API key and root agent, and writes `~/.botson/config.json`. This is the only step that isn't a NATS call — it has to run before any core exists for a client to configure that over.
+
+Edit that file (or send it over NATS once a core is running — see below) to add `gemini_api_key` (and `root_agent`, if you don't want the default `"Agent Botson"`), then restart.
 
 **3. Run the core**
 ```bash
 botson core start   # or `botson core` to run in the foreground
 ```
-From here, talk to it over NATS — see `internal/natsapi/subjects.go` for the `botson.*` subject table and [docs/nats-api.md](./docs/nats-api.md) for the `adk.*` surface (whose wire protocol is also documented in [NATS-ADK-Proxy](https://github.com/Savs-Agents/NATS-ADK-Proxy)'s README). `botson --help` lists the CLI's two subcommands (`core`, `setup`); there is no third.
+From here, talk to it over NATS — see `internal/natsapi/subjects.go` for the `botson.*` subject table and [docs/nats-api.md](./docs/nats-api.md) for the `adk.*` surface (whose wire protocol is also documented in [NATS-ADK-Proxy](https://github.com/Savs-Agents/NATS-ADK-Proxy)'s README). `botson --help` lists the CLI's subcommands (`core`, `update`); `update` isn't implemented yet.
 
-Every connection needs the NATS auth token `setup install` just generated and printed — it's also in `~/.botson/config.json`'s `nats_auth_token` field. A consumer on the same machine (e.g. [Botson-TUI](https://github.com/Savs-Agents/Botson-TUI)) can read that file directly and pair with zero configuration; a remote consumer needs the token copied over separately.
+Every connection needs the NATS auth token generated into `~/.botson/config.json`'s `nats_auth_token` field on first bootstrap. A consumer on the same machine (e.g. [Botson-TUI](https://github.com/Savs-Agents/Botson-TUI)) can read that file directly and pair with zero configuration; a remote consumer needs the token copied over separately.
 
 ## Configuration
 
-Settings live in `~/.botson/config.json` — your Gemini API key, chosen model, root agent, workspace directory, and NATS auth token. Change it via `setup install`, the `botson.settings.set` NATS subject (everything but the API key and the auth token), or the agent's own `updateSettings` tool. The file/command tools default to `workspace_root` (`~/.botson/workspace` unless changed); a session can point them at a different, unsandboxed absolute path instead via `stateDelta` on `/api/run` — see [docs/nats-api.md](./docs/nats-api.md#setting-a-sessions-working-directory).
+Settings live in `~/.botson/config.json` — your Gemini API key, chosen model, root agent, workspace directory, and NATS auth token. Change it by hand-editing the file (restart the core after), via the `botson.settings.set` NATS subject (including the API keys — restart still required for a key/model/provider change to take effect on an already-running core), or the agent's own `updateSettings` tool. The file/command tools default to `workspace_root` (`~/.botson/workspace` unless changed); a session can point them at a different, unsandboxed absolute path instead via `stateDelta` on `/api/run` — see [docs/nats-api.md](./docs/nats-api.md#setting-a-sessions-working-directory).
 
-By default Botson talks to Gemini. To use a model served through [OpenRouter](https://openrouter.ai) instead, set `provider` to `"openrouter"` and `openrouter_api_key` to your key (e.g. `botson setup install --non-interactive --provider openrouter --openrouter-api-key <key> --model anthropic/claude-3.5-sonnet`) — `model_name` then needs to be the full OpenRouter model slug, not a bare Gemini model name. A `provider` change takes effect on the next `botson core` restart.
+By default Botson talks to Gemini. To use a model served through [OpenRouter](https://openrouter.ai) instead, set `provider` to `"openrouter"` and `openrouter_api_key` to your key — `model_name` then needs to be the full OpenRouter model slug, not a bare Gemini model name. A `provider` change takes effect on the next `botson core` restart.
 
 ## Learn more
 

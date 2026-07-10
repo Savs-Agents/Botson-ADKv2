@@ -29,7 +29,7 @@ In the common case (you're running your own core alongside your consumer,
 or you know the port because you configured it) you can skip this and just
 hardcode the port you started it with.
 
-The embedded server requires a token on every connection — `setup install`
+The embedded server requires a token on every connection — `config.Load()`
 generates one the first time a core runs and stores it in
 `~/.botson/config.json`'s `nats_auth_token` field. Read it from there and
 pass it when connecting:
@@ -41,8 +41,7 @@ nc, _ := nats.Connect("nats://127.0.0.1:4222", nats.Token(token))
 If your consumer runs on the same machine as the core, this is the only
 file you need to read to pair with zero configuration -- Botson-TUI does
 exactly this. For a remote core, the token has to reach you out of band
-(the operator copies it from their own `~/.botson/config.json`, or from
-`setup install`'s output when the core was first configured); there's no
+(the operator copies it from their own `~/.botson/config.json`); there's no
 way to fetch it over NATS itself, since it's the credential gating that
 very connection. See
 [process-architecture.md §8](./process-architecture.md#8-limitations-and-directions-worth-thinking-about)
