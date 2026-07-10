@@ -69,7 +69,7 @@ func (m *openRouterModel) generate(ctx context.Context, req *model.LLMRequest) (
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+m.apiKey)
-	httpReq.Header.Set("HTTP-Referer", "https://github.com/xSaVageAU/Botson-ADKv2")
+	httpReq.Header.Set("HTTP-Referer", "https://github.com/Savs-Agents/Botson-ADKv2")
 	httpReq.Header.Set("X-Title", "Botson")
 
 	httpResp, err := m.httpClient.Do(httpReq)
