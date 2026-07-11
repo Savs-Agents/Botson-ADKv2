@@ -10,11 +10,21 @@ import (
 	"sync"
 )
 
+// ProviderKeys groups every model backend's API key under one JSON object
+// instead of top-level, provider-prefixed fields -- adding a third
+// provider means adding one field here, not another top-level key.
+type ProviderKeys struct {
+	// Gemini is required when Provider == "gemini" (the default).
+	Gemini string `json:"gemini"`
+	// OpenRouter is required when Provider == "openrouter".
+	OpenRouter string `json:"openrouter"`
+}
+
 // AppConfig holds the application configuration.
 type AppConfig struct {
-	ModelName    string `json:"model_name"`
-	GeminiAPIKey string `json:"gemini_api_key"`
-	RootAgent    string `json:"root_agent"`
+	ModelName    string       `json:"model_name"`
+	ProviderKeys ProviderKeys `json:"providerKeys"`
+	RootAgent    string       `json:"root_agent"`
 
 	// Provider selects which internal/providers backend builds the model.LLM
 	// at boot: "gemini" (default) or "openrouter". ModelName is interpreted
@@ -22,8 +32,6 @@ type AppConfig struct {
 	// or a full OpenRouter model slug (e.g. "anthropic/claude-3.5-sonnet")
 	// for "openrouter".
 	Provider string `json:"provider"`
-	// OpenRouterAPIKey is required when Provider == "openrouter".
-	OpenRouterAPIKey string `json:"openrouter_api_key"`
 
 	// WorkspaceRoot is the default directory the file/command tools
 	// (listFiles, readFile, writeFile, editFile, runCommand) operate in
@@ -57,17 +65,17 @@ type AppConfig struct {
 // existing value" when they see it come back in a request.
 const MaskedSecret = "******"
 
-// Mask returns a copy of cfg with secret fields (the Gemini API key)
+// Mask returns a copy of cfg with secret fields (the provider API keys)
 // replaced by MaskedSecret, so it's safe to hand to a UI or an agent tool.
 // Lives here rather than in internal/management so internal/engine/tools
 // can use it too without an import cycle (tools -> management -> agent -> tools).
 func Mask(cfg *AppConfig) AppConfig {
 	masked := *cfg
-	if masked.GeminiAPIKey != "" {
-		masked.GeminiAPIKey = MaskedSecret
+	if masked.ProviderKeys.Gemini != "" {
+		masked.ProviderKeys.Gemini = MaskedSecret
 	}
-	if masked.OpenRouterAPIKey != "" {
-		masked.OpenRouterAPIKey = MaskedSecret
+	if masked.ProviderKeys.OpenRouter != "" {
+		masked.ProviderKeys.OpenRouter = MaskedSecret
 	}
 	masked.ApiAuthToken = ""
 	return masked

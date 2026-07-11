@@ -29,12 +29,12 @@ type openRouterModel struct {
 }
 
 func newOpenRouterModel(cfg *config.AppConfig) (model.LLM, error) {
-	if cfg.OpenRouterAPIKey == "" {
+	if cfg.ProviderKeys.OpenRouter == "" {
 		return nil, fmt.Errorf("openrouter provider selected but no OpenRouter API key is configured")
 	}
 	return &openRouterModel{
 		httpClient: &http.Client{Timeout: 120 * time.Second},
-		apiKey:     cfg.OpenRouterAPIKey,
+		apiKey:     cfg.ProviderKeys.OpenRouter,
 		modelName:  cfg.ModelName,
 	}, nil
 }

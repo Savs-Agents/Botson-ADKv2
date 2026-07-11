@@ -15,7 +15,7 @@ import (
 // cmd/botson-core/bootstrap.go constructed it before this package existed.
 func newGeminiModel(ctx context.Context, cfg *config.AppConfig) (model.LLM, error) {
 	m, err := gemini.NewModel(ctx, cfg.ModelName, &genai.ClientConfig{
-		APIKey: cfg.GeminiAPIKey,
+		APIKey: cfg.ProviderKeys.Gemini,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini model: %w", err)

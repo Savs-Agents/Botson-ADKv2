@@ -84,14 +84,18 @@ func handleSettingsSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, modelOrProviderChanged, err := management.UpdateSettings(management.SettingsPatch{
-		ModelName:        req.ModelName,
-		RootAgent:        req.RootAgent,
-		GeminiAPIKey:     req.GeminiAPIKey,
-		WorkspaceRoot:    req.WorkspaceRoot,
-		Provider:         req.Provider,
-		OpenRouterAPIKey: req.OpenRouterAPIKey,
-	})
+	patch := management.SettingsPatch{
+		ModelName:     req.ModelName,
+		RootAgent:     req.RootAgent,
+		WorkspaceRoot: req.WorkspaceRoot,
+		Provider:      req.Provider,
+	}
+	if req.ProviderKeys != nil {
+		patch.GeminiAPIKey = req.ProviderKeys.Gemini
+		patch.OpenRouterAPIKey = req.ProviderKeys.OpenRouter
+	}
+
+	cfg, modelOrProviderChanged, err := management.UpdateSettings(patch)
 	if err != nil {
 		respondError(w, err)
 		return

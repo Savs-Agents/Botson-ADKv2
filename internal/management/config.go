@@ -49,7 +49,7 @@ func UpdateSettings(patch SettingsPatch) (masked config.AppConfig, modelOrProvid
 			cfg.RootAgent = *patch.RootAgent
 		}
 		if patch.GeminiAPIKey != nil {
-			cfg.GeminiAPIKey = *patch.GeminiAPIKey
+			cfg.ProviderKeys.Gemini = *patch.GeminiAPIKey
 		}
 		if patch.WorkspaceRoot != nil {
 			cfg.WorkspaceRoot = *patch.WorkspaceRoot
@@ -58,7 +58,7 @@ func UpdateSettings(patch SettingsPatch) (masked config.AppConfig, modelOrProvid
 			cfg.Provider = *patch.Provider
 		}
 		if patch.OpenRouterAPIKey != nil {
-			cfg.OpenRouterAPIKey = *patch.OpenRouterAPIKey
+			cfg.ProviderKeys.OpenRouter = *patch.OpenRouterAPIKey
 		}
 	})
 	if err != nil {

@@ -32,7 +32,7 @@ Running the core once bootstraps `~/.botson/config.json` with a generated worksp
 botson core start   # creates ~/.botson/config.json with a blank API key
 ```
 
-Edit that file (or `PATCH /botson/settings` once a core is running — see below) to add `gemini_api_key` (and `root_agent`, if you don't want the default `"Agent Botson"`), then restart.
+Edit that file (or `PATCH /botson/settings` once a core is running — see below) to add `providerKeys.gemini` (and `root_agent`, if you don't want the default `"Agent Botson"`), then restart.
 
 **3. Run the core, then chat**
 ```bash
@@ -47,7 +47,7 @@ Every connection needs the API auth token generated into `~/.botson/config.json`
 
 Settings live in `~/.botson/config.json` — your Gemini API key, chosen model, root agent, workspace directory, host/port, and API auth token. Change it by hand-editing the file (restart the core after), via `PATCH /botson/settings` (including the API keys — restart still required for a key/model/provider change to take effect on an already-running core), or the agent's own `updateSettings` tool. The file/command tools default to `workspace_root` (`~/.botson/workspace` unless changed); a session can point them at a different, unsandboxed absolute path instead via `stateDelta` on `/api/run` — see [docs/api.md](./docs/api.md#7-session-state-conventions).
 
-By default Botson talks to Gemini. To use a model served through [OpenRouter](https://openrouter.ai) instead, set `provider` to `"openrouter"` and `openrouter_api_key` to your key — `model_name` then needs to be the full OpenRouter model slug, not a bare Gemini model name. A `provider` change takes effect on the next `botson core` restart.
+By default Botson talks to Gemini. To use a model served through [OpenRouter](https://openrouter.ai) instead, set `provider` to `"openrouter"` and `providerKeys.openrouter` to your key — `model_name` then needs to be the full OpenRouter model slug, not a bare Gemini model name. A `provider` change takes effect on the next `botson core` restart.
 
 ## Learn more
 

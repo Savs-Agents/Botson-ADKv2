@@ -202,8 +202,8 @@ NATS subjects this replaced, which had no status-code channel of their own.
 
 | Route | Method | Body | Reply |
 |---|---|---|---|
-| `/botson/settings` | GET | — | `{"model_name","gemini_api_key","root_agent","workspace_root","provider","openrouter_api_key",...}` — `gemini_api_key`/`openrouter_api_key` are always masked (`"******"`); `api_auth_token` is never included |
-| `/botson/settings` | PATCH | `{"modelName"?,"rootAgent"?,"geminiApiKey"?,"workspaceRoot"?,"provider"?,"openRouterApiKey"?}` — omit a field to leave it unchanged | same shape as GET, plus `"note"` (present only if `modelName`/`provider` changed) warning that this running core process is still using the model/provider it booted with. A `workspaceRoot` change applies immediately; `modelName`/`provider`/the API keys take effect on the next core restart |
+| `/botson/settings` | GET | — | `{"model_name","providerKeys":{"gemini","openrouter"},"root_agent","workspace_root","provider",...}` — `providerKeys.gemini`/`providerKeys.openrouter` are always masked (`"******"`); `api_auth_token` is never included |
+| `/botson/settings` | PATCH | `{"modelName"?,"rootAgent"?,"providerKeys"?:{"gemini"?,"openrouter"?},"workspaceRoot"?,"provider"?}` — omit a field (or the whole `providerKeys` object) to leave it unchanged | same shape as GET, plus `"note"` (present only if `modelName`/`provider` changed) warning that this running core process is still using the model/provider it booted with. A `workspaceRoot` change applies immediately; `modelName`/`provider`/the API keys take effect on the next core restart |
 
 ### Agents
 

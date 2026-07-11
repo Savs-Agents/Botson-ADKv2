@@ -80,7 +80,7 @@ go run scripts/build_linux.go     # Linux
 
 ### First-run setup
 
-There's no dedicated install/config command. `config.Load()` (`internal/config/config.go`) bootstraps `~/.botson/config.json` on first read regardless of how it's triggered — e.g. by just running `botson core` — filling in a generated `workspace_root` and `api_auth_token`, a default `model_name`/`root_agent`, but a blank `gemini_api_key`. Fill that in by hand-editing the file, or via `PATCH /botson/settings` on an already-running core (see "Configuration reference" below), then (re)start the core.
+There's no dedicated install/config command. `config.Load()` (`internal/config/config.go`) bootstraps `~/.botson/config.json` on first read regardless of how it's triggered — e.g. by just running `botson core` — filling in a generated `workspace_root` and `api_auth_token`, a default `model_name`/`root_agent`, but a blank `providerKeys.gemini`. Fill that in by hand-editing the file, or via `PATCH /botson/settings` on an already-running core (see "Configuration reference" below), then (re)start the core.
 
 ### Running the core
 
@@ -110,9 +110,11 @@ Settings, custom-agent CRUD, and session/dashboard management are all `/botson/*
 ```json
 {
   "model_name": "gemini-3.1-flash-lite",
-  "gemini_api_key": "your_api_key_here",
+  "providerKeys": {
+    "gemini": "your_api_key_here",
+    "openrouter": ""
+  },
   "provider": "gemini",
-  "openrouter_api_key": "",
   "root_agent": "Agent Botson",
   "workspace_root": "/home/you/.botson/workspace",
   "host": "127.0.0.1",
@@ -124,9 +126,13 @@ Settings, custom-agent CRUD, and session/dashboard management are all `/botson/*
 boot: `"gemini"` (default) or `"openrouter"`. `model_name` is interpreted
 accordingly -- a bare Gemini model name, or a full OpenRouter model slug
 (e.g. `"anthropic/claude-3.5-sonnet"`) when `provider` is `"openrouter"`,
-in which case `openrouter_api_key` is required instead of (or alongside)
-`gemini_api_key`. Like `model_name`/`root_agent`, changing `provider`
-takes effect on the next core restart, not live.
+in which case `providerKeys.openrouter` is required instead of (or
+alongside) `providerKeys.gemini`. Every model backend's key lives under
+this one `providerKeys` object (`internal/config.ProviderKeys`) instead of
+a top-level, provider-prefixed field per key -- adding a third provider
+means adding one field there, not another top-level config key. Like
+`model_name`/`root_agent`, changing `provider` takes effect on the next
+core restart, not live.
 
 `host`/`port` are the bind address of Botson's own HTTP API server
 (`internal/networking/api`); a CLI flag on `botson core`/`core start` can
@@ -145,7 +151,7 @@ a session can override it per-session via `stateDelta` on `/api/run` (see
 [docs/api.md §7](./docs/api.md#7-session-state-conventions)),
 to any absolute path — not sandboxed, unlike `workspace_root` itself.
 
-Prefer `PATCH /botson/settings` or the `updateSettings` tool over hand-editing this file while a `botson core` process is running, so the in-memory copy that process is holding doesn't drift from disk — see "Self-configuration" above. Hand-editing is fine when no core is running (e.g. the very first edit, to add `gemini_api_key`).
+Prefer `PATCH /botson/settings` or the `updateSettings` tool over hand-editing this file while a `botson core` process is running, so the in-memory copy that process is holding doesn't drift from disk — see "Self-configuration" above. Hand-editing is fine when no core is running (e.g. the very first edit, to add `providerKeys.gemini`).
 
 ## Dependencies
 
