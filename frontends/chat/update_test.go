@@ -2,6 +2,9 @@ package chat
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -144,25 +147,118 @@ func TestChatTab_TurnResultError(t *testing.T) {
 	}
 }
 
-func TestChatTab_NewSessionMsgSwitchesSession(t *testing.T) {
+func TestChatTab_SwitchAgentMsgResetsSessionLocallyWithNoNetworkCall(t *testing.T) {
 	m := readyChatTab(t)
 	m.waiting = true
 	m.pending = &pendingConfirmation{callID: "c1", hint: "x"}
 	m.history = []string{"you: hi"}
+	m.sessionID = "sess-old"
+	m.sessionCreated = true
 
-	mm, _ := m.Update(newSessionMsg{agent: "Agent Botson", user: "chat-alice", sessionID: "sess-2"})
+	mm, cmd := m.Update(switchAgentMsg{agent: "Other Agent"})
 
+	if cmd != nil {
+		t.Error("expected no cmd -- switching agent is a purely local reset, no network call until a message is sent")
+	}
 	if mm.waiting {
-		t.Error("expected waiting=false after newSessionMsg")
+		t.Error("expected waiting=false, since nothing async is happening")
 	}
 	if mm.pending != nil {
-		t.Error("expected pending to be cleared after newSessionMsg")
+		t.Error("expected pending to be cleared")
 	}
-	if mm.sessionID != "sess-2" {
-		t.Errorf("sessionID = %q, want sess-2", mm.sessionID)
+	if mm.agent != "Other Agent" {
+		t.Errorf("agent = %q, want Other Agent", mm.agent)
+	}
+	if mm.sessionID == "sess-old" {
+		t.Error("expected a freshly generated sessionID")
+	}
+	if mm.sessionCreated {
+		t.Error("expected sessionCreated=false for the fresh, not-yet-used session")
 	}
 	if len(mm.history) != 0 {
 		t.Errorf("expected history to be reset, got %v", mm.history)
+	}
+}
+
+func TestChatTab_CtrlNResetsSessionLocallyWithNoNetworkCall(t *testing.T) {
+	m := readyChatTab(t)
+	m.sessionID = "sess-old"
+	m.sessionCreated = true
+	m.history = []string{"you: hi"}
+
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+
+	if cmd != nil {
+		t.Error("expected no cmd -- ctrl+n is a purely local reset, no network call until a message is sent")
+	}
+	if mm.sessionID == "sess-old" {
+		t.Error("expected a freshly generated sessionID")
+	}
+	if mm.sessionCreated {
+		t.Error("expected sessionCreated=false for the fresh, not-yet-used session")
+	}
+	if len(mm.history) != 0 {
+		t.Errorf("expected history to be reset, got %v", mm.history)
+	}
+}
+
+func TestChatTab_TurnResultMarksSessionCreated(t *testing.T) {
+	m := readyChatTab(t)
+	if m.sessionCreated {
+		t.Fatal("expected a freshly constructed chat tab to start with sessionCreated=false")
+	}
+
+	mm, _ := m.Update(turnResultMsg{})
+
+	if !mm.sessionCreated {
+		t.Error("expected sessionCreated=true after any turn succeeds, whether or not this tab created it")
+	}
+}
+
+func TestChatTab_EnsureSessionAndRunTurn_CreatesSessionOnceThenReuses(t *testing.T) {
+	var createCalls, runCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/sessions/"):
+			createCalls++
+		case r.URL.Path == "/api/run":
+			runCalls++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/sessions/") {
+			_, _ = w.Write([]byte(`{}`))
+		} else {
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer srv.Close()
+
+	m := newChatTab(context.Background(), newClient(srv.URL, "tok"), "Agent Botson", "chat-alice", "sess-1")
+	m.SetSize(80, 24)
+
+	// First message: session doesn't exist yet, must be created first.
+	cmd := m.submitMessage("hello")
+	msg := cmd()
+	if _, ok := msg.(turnResultMsg); !ok {
+		t.Fatalf("expected a turnResultMsg, got %T", msg)
+	}
+	if createCalls != 1 {
+		t.Errorf("createCalls = %d, want 1 (session should be created lazily on first use)", createCalls)
+	}
+	if runCalls != 1 {
+		t.Errorf("runCalls = %d, want 1", runCalls)
+	}
+
+	m, _ = m.Update(msg) // mark sessionCreated via the returned turnResultMsg
+
+	// Second message: session already exists, must not be re-created.
+	cmd = m.submitMessage("again")
+	cmd()
+	if createCalls != 1 {
+		t.Errorf("createCalls = %d, want still 1 (must not recreate an already-created session)", createCalls)
+	}
+	if runCalls != 2 {
+		t.Errorf("runCalls = %d, want 2", runCalls)
 	}
 }
 

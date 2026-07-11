@@ -55,10 +55,10 @@ func Run(ctx context.Context, cfg *config.AppConfig, agentOverride string) error
 	// syntax is incorrect" the first time this shipped with "chat:" here.
 	userID := "chat-" + localUsername()
 
-	if err := c.CreateSession(ctx, agent, userID, sessionID); err != nil {
-		return err
-	}
-
+	// Not created on the server yet -- chatTabModel creates it lazily, on
+	// the first message/action, so opening the TUI and doing nothing
+	// leaves no empty session behind. See chatTabModel's sessionCreated
+	// doc comment.
 	m := newModel(ctx, c, agent, userID, sessionID)
 	// WithAltScreen: the dashboard is a fixed-size, multi-tab layout, not a
 	// scrolling transcript -- without it, a tab whose rendered content is

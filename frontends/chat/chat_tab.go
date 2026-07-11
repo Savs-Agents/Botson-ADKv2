@@ -31,6 +31,16 @@ type pendingConfirmation struct {
 // the Agents tab) can repoint an already-running chat tab without
 // restarting the program.
 //
+// Sessions are created lazily: a freshly-generated sessionID (at startup,
+// after ctrl+n, or after switching agent) is never POSTed to the server
+// until the user actually does something with it -- sends a message or
+// toggles auto-mode. sessionCreated tracks whether that's happened yet.
+// Without this, simply opening the TUI (or pressing ctrl+n) and doing
+// nothing would leave an empty, never-used session persisted on disk.
+// switchSessionMsg is exempt: it resumes a session that already exists
+// (it came from GET /botson/sessions), so sessionCreated starts true for
+// it.
+//
 // Known limitation: resuming a session via switchSessionMsg that has a
 // genuinely pending, unanswered HITL confirmation won't show the y/n
 // prompt retroactively -- GetSession's SessionEventSummary only carries
@@ -41,10 +51,11 @@ type chatTabModel struct {
 	ctx    context.Context
 	client *client
 
-	agent     string
-	user      string
-	sessionID string
-	autoMode  bool
+	agent          string
+	user           string
+	sessionID      string
+	sessionCreated bool // has sessionID actually been POSTed to the server yet?
+	autoMode       bool
 
 	viewport viewport.Model
 	input    textinput.Model
@@ -112,13 +123,6 @@ type sessionLoadedMsg struct {
 	err                    error
 }
 
-// newSessionMsg is delivered when CreateSession completes, in response to
-// ctrl+n or a switchAgentMsg.
-type newSessionMsg struct {
-	agent, user, sessionID string
-	err                    error
-}
-
 // autoModeSetMsg is delivered when SetSessionAutoMode completes.
 type autoModeSetMsg struct {
 	enabled bool
@@ -136,7 +140,7 @@ func (m chatTabModel) submitMessage(text string) tea.Cmd {
 			Parts: []*genai.Part{{Text: text}},
 		},
 	}
-	return m.runTurn(req)
+	return m.ensureSessionAndRunTurn(req)
 }
 
 // answerConfirmation sends the human's decision back on the pending
@@ -171,6 +175,26 @@ func (m chatTabModel) runTurn(req adkwire.RunAgentRequest) tea.Cmd {
 	}
 }
 
+// ensureSessionAndRunTurn is runTurn, but first creates the session on the
+// server if it hasn't been created yet (see sessionCreated's doc comment
+// on chatTabModel). ADK's own POST /api/run requires the session to
+// already exist -- it 404s otherwise, it does not auto-create one -- so
+// this is the one place that lazy-creation actually has to happen.
+func (m chatTabModel) ensureSessionAndRunTurn(req adkwire.RunAgentRequest) tea.Cmd {
+	if m.sessionCreated {
+		return m.runTurn(req)
+	}
+	c, ctx := m.client, m.ctx
+	agent, user, sessionID := m.agent, m.user, m.sessionID
+	return func() tea.Msg {
+		if err := c.CreateSession(ctx, agent, user, sessionID); err != nil {
+			return turnResultMsg{err: err}
+		}
+		events, err := c.RunTurn(ctx, req)
+		return turnResultMsg{events: events, err: err}
+	}
+}
+
 // loadSession fetches full history for a session switch.
 func (m chatTabModel) loadSession(agent, user, sessionID string) tea.Cmd {
 	c, ctx := m.client, m.ctx
@@ -180,22 +204,44 @@ func (m chatTabModel) loadSession(agent, user, sessionID string) tea.Cmd {
 	}
 }
 
-// startNewSession creates a fresh session against agent for the current
-// user.
-func (m chatTabModel) startNewSession(agent string) tea.Cmd {
-	c, ctx, user := m.client, m.ctx, m.user
-	sessionID := uuid.NewString()
-	return func() tea.Msg {
-		err := c.CreateSession(ctx, agent, user, sessionID)
-		return newSessionMsg{agent: agent, user: user, sessionID: sessionID, err: err}
+// newLocalSession resets chat state to a brand-new, not-yet-created
+// session against agent -- purely local, no network call. The session is
+// only persisted lazily, on the first real action (see sessionCreated's
+// doc comment), so switching to a fresh session (ctrl+n, or picking a
+// different agent from the Agents tab) that the user then never actually
+// uses leaves nothing behind on disk.
+func (m chatTabModel) newLocalSession(agent string) chatTabModel {
+	m.agent = agent
+	m.sessionID = uuid.NewString()
+	m.sessionCreated = false
+	m.waiting = false
+	m.pending = nil
+	m.autoMode = false
+	m.history = nil
+	m.err = nil
+	m.input.Reset()
+	m.input.Placeholder = "message " + agent + "..."
+	if m.ready {
+		m.viewport.SetContent("")
 	}
+	return m
 }
 
+// toggleAutoMode flips auto-mode for the active session, creating the
+// session first if it hasn't been created yet (same reasoning as
+// ensureSessionAndRunTurn -- PATCH .../autoMode 404s against a session
+// that was never actually POSTed).
 func (m chatTabModel) toggleAutoMode() tea.Cmd {
 	c, ctx := m.client, m.ctx
 	agent, user, sessionID := m.agent, m.user, m.sessionID
 	enabled := !m.autoMode
+	needsCreate := !m.sessionCreated
 	return func() tea.Msg {
+		if needsCreate {
+			if err := c.CreateSession(ctx, agent, user, sessionID); err != nil {
+				return autoModeSetMsg{err: err}
+			}
+		}
 		err := c.SetSessionAutoMode(ctx, agent, user, sessionID, enabled)
 		return autoModeSetMsg{enabled: enabled, err: err}
 	}
@@ -209,9 +255,7 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 		return m, m.loadSession(msg.agent, msg.user, msg.sessionID)
 
 	case switchAgentMsg:
-		m.waiting = true
-		m.err = nil
-		return m, m.startNewSession(msg.agent)
+		return m.newLocalSession(msg.agent), nil
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -225,6 +269,7 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		m.sessionCreated = true
 		lines, pending := renderEvents(msg.events)
 		m.history = append(m.history, lines...)
 		m.pending = pending
@@ -240,6 +285,7 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 		}
 		m.err = nil
 		m.agent, m.user, m.sessionID = msg.agent, msg.user, msg.sessionID
+		m.sessionCreated = true // resumed from GET /botson/sessions -- it already exists
 		m.pending = nil
 		m.history = nil
 		for _, ev := range msg.detail.Events {
@@ -254,21 +300,6 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, nil
 
-	case newSessionMsg:
-		m.waiting = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err = nil
-		m.agent, m.user, m.sessionID = msg.agent, msg.user, msg.sessionID
-		m.pending = nil
-		m.autoMode = false
-		m.history = nil
-		m.input.Placeholder = "message " + m.agent + "..."
-		m.viewport.SetContent("")
-		return m, nil
-
 	case autoModeSetMsg:
 		m.waiting = false
 		if msg.err != nil {
@@ -276,6 +307,7 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		m.sessionCreated = true
 		m.autoMode = msg.enabled
 		return m, nil
 
@@ -309,8 +341,7 @@ func (m chatTabModel) handleKey(msg tea.KeyMsg) (chatTabModel, tea.Cmd) {
 
 	switch msg.String() {
 	case "ctrl+n":
-		m.waiting = true
-		return m, m.startNewSession(m.agent)
+		return m.newLocalSession(m.agent), nil
 	case "ctrl+a":
 		m.waiting = true
 		return m, m.toggleAutoMode()
@@ -353,6 +384,9 @@ func (m chatTabModel) View() string {
 	}
 
 	status := fmt.Sprintf("— %s (%s) —", m.agent, m.sessionID)
+	if !m.sessionCreated {
+		status += " " + dimStyle.Render("[not saved yet]")
+	}
 	if m.autoMode {
 		status += " " + successStyle.Render("[auto-mode]")
 	}

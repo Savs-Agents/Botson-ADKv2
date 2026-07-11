@@ -37,7 +37,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// (and its spinner keeps animating) while the user is looking at the
 	// Sessions tab, the same way a real dashboard's panels keep working
 	// in the background.
-	case turnResultMsg, sessionLoadedMsg, newSessionMsg, autoModeSetMsg, spinner.TickMsg:
+	case turnResultMsg, sessionLoadedMsg, autoModeSetMsg, spinner.TickMsg:
 		var cmd tea.Cmd
 		m.chatTab, cmd = m.chatTab.Update(msg)
 		return m, cmd

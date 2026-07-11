@@ -105,11 +105,14 @@ func TestModel_SwitchAgentMsgRoutesToChatAndSwitchesTab(t *testing.T) {
 	if mm.activeTab != tabChat {
 		t.Errorf("activeTab = %v, want tabChat", mm.activeTab)
 	}
-	if !mm.chatTab.waiting {
-		t.Error("expected chat tab to start creating a session for the new agent")
+	if mm.chatTab.agent != "Other Agent" {
+		t.Errorf("chat tab agent = %q, want Other Agent", mm.chatTab.agent)
 	}
-	if cmd == nil {
-		t.Error("expected a non-nil cmd to create the session")
+	if mm.chatTab.sessionCreated {
+		t.Error("expected the new session to not be created on the server yet -- that's lazy, on first message")
+	}
+	if cmd != nil {
+		t.Error("expected no cmd -- switching agent is a purely local reset, no network call until a message is sent")
 	}
 }
 
