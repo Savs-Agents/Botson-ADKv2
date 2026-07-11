@@ -45,7 +45,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(newChatCmd(), newCoreCmd(), newUpdateCmd())
+	rootCmd.AddCommand(newChatCmd(), newCoreCmd())
 
 	// A completely bare `botson` (no subcommand, no flags at all) implies
 	// `botson chat` -- rewriting argv before Cobra resolves it lets chat's
