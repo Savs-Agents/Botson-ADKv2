@@ -14,18 +14,18 @@ var WorkspaceRoot string
 
 // SetWorkspaceRoot sets WorkspaceRoot. Called once at boot from the
 // configured AppConfig.WorkspaceRoot, and again any time it's changed live
-// via botson.settings.set (internal/natsapi/server.go).
+// via PATCH /botson/settings (internal/management.UpdateSettings).
 func SetWorkspaceRoot(root string) {
 	WorkspaceRoot = root
 }
 
 // cwdStateKey is the reserved session-state key a consumer sets via
-// stateDelta on /api/run (adk.rest.POST /api/run) to override the working
-// directory for a session -- see docs/nats-api.md. Unlike WorkspaceRoot,
-// an override is not sandboxed to any particular root: it may be any
-// absolute path the core process can read/write. That trade (flexibility
-// over a path jail) is why the embedded NATS server requires an auth
-// token (AppConfig.NatsAuthToken) -- see cmd/botson-core/cmd_core.go.
+// stateDelta on POST /api/run to override the working directory for a
+// session -- see docs/nats-api.md. Unlike WorkspaceRoot, an override is
+// not sandboxed to any particular root: it may be any absolute path the
+// core process can read/write. That trade (flexibility over a path jail)
+// is why Botson's HTTP API requires a bearer auth token
+// (AppConfig.ApiAuthToken) -- see cmd/botson-core/cmd_core.go.
 const cwdStateKey = "botson:cwd"
 
 // effectiveRoot resolves the root a tool call should operate in: the

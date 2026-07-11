@@ -147,7 +147,7 @@ func TestFromChatResponse_MultiToolCall(t *testing.T) {
 	}
 }
 
-// writeFileArgsLike mirrors internal/tools.WriteFileArgs's shape closely
+// writeFileArgsLike mirrors internal/engine/tools.WriteFileArgs's shape closely
 // enough to exercise the same jsonschema-tag-driven schema generation a
 // real Botson tool goes through.
 type writeFileArgsLike struct {

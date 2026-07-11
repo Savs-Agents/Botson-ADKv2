@@ -53,7 +53,7 @@ type fakeTool struct {
 func (f fakeTool) Name() string { return f.name }
 
 // newPlugin builds an orderPlugin whose gated set is exactly gatedNames --
-// mirroring how bootstrap wires New to internal/agent.RequiresConfirmation.
+// mirroring how bootstrap wires New to internal/engine/agent.RequiresConfirmation.
 func newPlugin(gatedNames ...string) *orderPlugin {
 	gated := map[string]bool{}
 	for _, n := range gatedNames {

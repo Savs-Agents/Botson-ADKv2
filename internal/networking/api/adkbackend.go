@@ -1,16 +1,9 @@
-// Package adkgateway spins up a real Google ADK v2 REST server (via
-// google.golang.org/adk/v2/cmd/launcher/prod) on a loopback port and fronts
-// it with a NATS gateway, so any NATS client can invoke the agent registry
-// as a microservice without speaking HTTP directly. See the sibling
-// github.com/Savs-Agents/NATS-ADK-Proxy repo's protocol package for the wire
-// contract this speaks -- that repo used to host this exact code too, but
-// this package (the gateway/backend implementation) only ever had one
-// consumer, botson-core, so it now lives here where it's easier to adapt.
-// protocol and client stayed in NATS-ADK-Proxy since Botson-TUI depends on
-// client directly, and both packages are deliberately dependency-light (no
-// ADK/genai imports) so a thin Go client doesn't have to pull in Botson's
-// full stack just to talk NATS.
-package adkgateway
+// StartBackend runs a real Google ADK v2 REST+A2A server (via
+// google.golang.org/adk/v2/cmd/launcher/prod) internally; adkreverseproxy.go
+// fronts it with a plain HTTP reverse proxy so this package's own Server
+// (server.go) can expose ADK's stock REST/A2A surface without
+// reimplementing any of it by hand.
+package api
 
 import (
 	"context"
@@ -24,7 +17,7 @@ import (
 	"google.golang.org/adk/v2/cmd/launcher/prod"
 )
 
-// readyTimeout bounds how long startBackend waits for the backend to become
+// readyTimeout bounds how long StartBackend waits for the backend to become
 // reachable before giving up.
 const readyTimeout = 15 * time.Second
 
@@ -35,11 +28,11 @@ const readyTimeout = 15 * time.Second
 // /api/run, the handler runs the whole agent turn (every LLM round trip and
 // tool call) before writing anything, so the 15s default silently severs
 // the connection mid-turn for any real multi-tool-call turn. That produces
-// a confusing symptom one layer up: the gateway's HTTPClient.Do sees the
+// a confusing symptom one layer up: the proxy's http.Client.Do sees the
 // killed connection as a plain EOF, and the backend's own log shows
 // "superfluous response.WriteHeader call" from the encode that failed
 // against the now-dead connection. serverIdleTimeout is bumped alongside
-// it since the gateway's http.DefaultClient pools keep-alive connections
+// it since the proxy's http.DefaultClient pools keep-alive connections
 // with a 90s IdleConnTimeout -- if the server's idle timeout were shorter,
 // it could close a connection the client still thinks is live, causing the
 // same EOF for a request that just happened to follow an idle gap.
@@ -55,15 +48,26 @@ type backend struct {
 	err     error // valid only after done is closed
 }
 
-// startBackend launches prod.NewLauncher() against cfg on a loopback port
-// (port==0 picks a free ephemeral port) with the REST API and A2A
-// sublaunchers activated. It blocks until the backend responds to a
-// readiness probe, the launcher exits early (e.g. a missing AgentLoader),
-// ctx is done, or readyTimeout elapses.
+// StartBackend launches prod.NewLauncher() against cfg on port (port==0
+// picks a free ephemeral port) with the REST API and A2A sublaunchers
+// activated. It blocks until the backend responds to a readiness probe, the
+// launcher exits early (e.g. a missing AgentLoader), ctx is done, or
+// readyTimeout elapses.
+//
+// Note: the underlying ADK launcher (cmd/launcher/web) always binds its
+// http.Server to ":<port>" -- all interfaces, not loopback-only -- and has
+// no flag or hook for restricting that or adding auth. This backend's port
+// is picked freely/never advertised, but it is not itself network-isolated
+// by ADK; this package's own bearer-token auth (auth.go) in front of the
+// reverse proxy (adkreverseproxy.go) is what actually gates real traffic,
+// not this bind behavior. See docs/process-architecture.md for the
+// accepted residual risk this leaves (anything that can already reach the
+// host machine can still reach this backend's port directly,
+// unauthenticated).
 //
 // The launcher keeps running until ctx is cancelled; callers are responsible
 // for cancelling ctx to shut it down.
-func startBackend(ctx context.Context, cfg launcher.Config, port int) (*backend, error) {
+func StartBackend(ctx context.Context, cfg launcher.Config, port int) (*backend, error) {
 	if port == 0 {
 		p, err := freePort()
 		if err != nil {

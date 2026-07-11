@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 
-	"botson/internal/agent"
-	coreartifact "botson/internal/artifact"
+	"botson/internal/engine/agent"
+	coreartifact "botson/internal/storage/artifact"
 	"botson/internal/config"
 	"botson/internal/providers"
-	coresession "botson/internal/session"
-	"botson/internal/toolorder"
-	"botson/internal/tools"
+	coresession "botson/internal/storage/session"
+	"botson/internal/engine/toolorder"
+	"botson/internal/engine/tools"
 
 	"google.golang.org/adk/v2/cmd/launcher"
 	"google.golang.org/adk/v2/plugin"

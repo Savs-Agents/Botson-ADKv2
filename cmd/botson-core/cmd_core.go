@@ -7,13 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"botson/internal/adkgateway"
 	"botson/internal/automode"
 	"botson/internal/daemon"
-	"botson/internal/natsapi"
+	"botson/internal/networking/api"
 
-	"github.com/nats-io/nats-server/v2/server"
-	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -24,39 +21,69 @@ const coreDisplayName = "Botson core"
 // newCoreCmd starts Botson's core: the only process that ever holds the
 // Gemini model, agent registry, and session/artifact services, and the
 // only thing any consumer -- a Discord bot, a web UI, anything -- ever
-// talks to. It's an embedded NATS server plus two subject namespaces on
-// top of it: "adk.*" (internal/adkgateway, fronting the real ADK REST/A2A
-// surface) and "botson.*"
-// (internal/natsapi, for settings/agents/sessions/dashboard -- state
-// that isn't part of stock ADK's own API). There is no other
-// interface in this binary; nothing about this command dispatches to a
-// TUI or any other in-process consumer.
+// talks to. It's a single HTTP server (internal/networking/api) exposing
+// ADK's own REST/A2A surface (reverse-proxied into an internally-run ADK
+// backend) and Botson's own settings/agents/sessions/dashboard routes
+// side by side, both behind one bearer-token auth middleware. There is no
+// other interface in this binary; nothing about this command dispatches
+// to a TUI or any other in-process consumer.
 func newCoreCmd() *cobra.Command {
+	var host string
 	var port int
 
 	cmd := &cobra.Command{
 		Use:   "core",
-		Short: "Start Botson's shared core: the NATS API any interface talks to",
+		Short: "Start Botson's shared core: the HTTP API any interface talks to",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCore(cmd.Context(), port)
+			h, p := resolveHostPort(cmd, host, port)
+			return runCore(cmd.Context(), h, p)
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", 4222, "Port to run the embedded NATS server on")
+	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "Host to bind Botson's HTTP API server to")
+	cmd.Flags().IntVar(&port, "port", 4222, "Port to bind Botson's HTTP API server to")
 
 	cmd.AddCommand(newCoreStartCmd(), newCoreStopCmd(), newCoreStatusCmd())
 	return cmd
 }
 
+// resolveHostPort returns the host/port to actually use: boot.Config's
+// persisted defaults (~/.botson/config.json), overridden only by a flag the
+// user actually passed on this invocation (not just its static --help
+// default) -- so config.json remains the real default and a flag is an
+// explicit, non-persisted, per-run override.
+func resolveHostPort(cmd *cobra.Command, flagHost string, flagPort int) (string, int) {
+	host := boot.Config.Host
+	if cmd.Flags().Changed("host") {
+		host = flagHost
+	}
+	port := boot.Config.Port
+	if cmd.Flags().Changed("port") {
+		port = flagPort
+	}
+	return host, port
+}
+
 // coreDaemonChildArgs builds the argv used to relaunch this executable as a
-// detached background process, carrying the same flags the user passed. It
-// is exactly the plain `core` subcommand a user would type themselves --
-// runCore registers daemon state regardless of how it was launched (see its
-// doc comment), so there's no separate hidden child command to maintain.
-func coreDaemonChildArgs(port int) []string {
-	return []string{"core", "--port=" + strconv.Itoa(port)}
+// detached background process. It is exactly the plain `core` subcommand a
+// user would type themselves -- runCore registers daemon state regardless
+// of how it was launched (see its doc comment), so there's no separate
+// hidden child command to maintain. --host/--port are only forwarded when
+// the user actually passed them here: otherwise the detached child resolves
+// its own default from a freshly-read config.json at its own startup,
+// exactly like a plain foreground `botson core` would.
+func coreDaemonChildArgs(cmd *cobra.Command, host string, port int) []string {
+	args := []string{"core"}
+	if cmd.Flags().Changed("host") {
+		args = append(args, "--host="+host)
+	}
+	if cmd.Flags().Changed("port") {
+		args = append(args, "--port="+strconv.Itoa(port))
+	}
+	return args
 }
 
 func newCoreStartCmd() *cobra.Command {
+	var host string
 	var port int
 
 	cmd := &cobra.Command{
@@ -68,7 +95,7 @@ func newCoreStartCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to resolve current directory: %w", err)
 			}
-			pid, logPath, err := daemon.Start(coreDaemonName, coreDisplayName, wd, coreDaemonChildArgs(port))
+			pid, logPath, err := daemon.Start(coreDaemonName, coreDisplayName, wd, coreDaemonChildArgs(cmd, host, port))
 			if err != nil {
 				return err
 			}
@@ -76,7 +103,8 @@ func newCoreStartCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().IntVar(&port, "port", 4222, "Port to run the embedded NATS server on")
+	cmd.Flags().StringVar(&host, "host", "127.0.0.1", "Host to bind Botson's HTTP API server to")
+	cmd.Flags().IntVar(&port, "port", 4222, "Port to bind Botson's HTTP API server to")
 	return cmd
 }
 
@@ -125,7 +153,7 @@ func newCoreStatusCmd() *cobra.Command {
 // or under an external supervisor like systemd (a plain `ExecStart=botson
 // core` unit works fine here -- systemd doesn't need this process to
 // self-detach).
-func runCore(ctx context.Context, port int) error {
+func runCore(ctx context.Context, host string, port int) error {
 	daemonCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -139,54 +167,30 @@ func runCore(ctx context.Context, port int) error {
 		PID:       os.Getpid(),
 		Port:      ctrlPort,
 		StartedAt: time.Now(),
-		Meta:      map[string]string{"natsPort": strconv.Itoa(port)},
+		Meta:      map[string]string{"apiHost": host, "apiPort": strconv.Itoa(port)},
 	}); err != nil {
 		return fmt.Errorf("failed to write daemon state: %w", err)
 	}
 	defer daemon.RemoveState(coreDaemonName)
 
-	return runCoreServer(daemonCtx, port, false)
+	return runCoreServer(daemonCtx, host, port, false)
 }
 
-// runCoreServer is the actual core -- an embedded NATS server plus the two
-// subject namespaces described on newCoreCmd -- with no daemon-state
-// registration of its own. quiet suppresses the startup banner. Blocks
-// until ctx is done (or either namespace's server exits unexpectedly),
-// then shuts everything down.
-func runCoreServer(ctx context.Context, port int, quiet bool) error {
-	srv, err := server.NewServer(&server.Options{
-		Host:          "127.0.0.1",
-		Port:          port,
-		NoLog:         quiet,
-		Authorization: boot.Config.NatsAuthToken,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to configure the embedded NATS server: %w", err)
-	}
-	go srv.Start()
-	if !srv.ReadyForConnections(5 * time.Second) {
-		return fmt.Errorf("embedded NATS server never became ready")
-	}
-	defer srv.Shutdown()
-
-	// The server's own Authorization token (above) gates every connection,
-	// including this in-process one -- without passing it here, the core's
-	// own adkgateway/natsapi wiring would be rejected by its own server.
-	nc, err := nats.Connect(srv.ClientURL(), nats.Token(boot.Config.NatsAuthToken))
-	if err != nil {
-		return fmt.Errorf("failed to connect to the embedded NATS server: %w", err)
-	}
-	defer nc.Close()
-
+// runCoreServer is the actual core -- a single HTTP API server (see
+// newCoreCmd's doc comment) plus the automode background worker -- with no
+// daemon-state registration of its own. quiet suppresses the startup
+// banner. Blocks until ctx is done (or the server exits unexpectedly), then
+// shuts everything down.
+func runCoreServer(ctx context.Context, host string, port int, quiet bool) error {
 	if !quiet {
 		provider := boot.Config.Provider
 		if provider == "" {
 			provider = "gemini"
 		}
-		fmt.Printf("Starting Botson's core on nats://127.0.0.1:%d (token-authenticated)... please do not close this window.\n", port)
+		fmt.Printf("Starting Botson's core on http://%s:%d (bearer-token authenticated)... please do not close this window.\n", host, port)
 		// The model is built once, here at boot, from whatever provider/
 		// model/API key were in config.json at this moment -- a later
-		// settings change updates config.json and botson.settings.get's
+		// settings change updates config.json and GET /botson/settings's
 		// reply, but NOT this already-running process's model, until it's
 		// restarted. Printing the actually-active provider/model makes
 		// that mismatch obvious instead of a confusing wrong-provider
@@ -194,42 +198,28 @@ func runCoreServer(ctx context.Context, port int, quiet bool) error {
 		fmt.Printf("Provider: %s, model: %s\n", provider, boot.Config.ModelName)
 	}
 
-	gw, err := adkgateway.New(adkgateway.Config{
-		NATSConn:      nc,
-		ADK:           *boot.Launcher,
-		SubjectPrefix: "adk",
-		// The gateway's own per-request HTTP deadline to the local ADK
-		// backend defaults to a fixed 30s (gatewayOptions.requestTimeout
-		// in internal/adkgateway/gateway.go), which is shorter than
-		// runCommand's own default subprocess timeout
-		// (procutil.DefaultTimeout) -- a turn with even one
-		// default-timeout runCommand call, or a few sequential
-		// tool/model round trips, would blow past 30s and fail with
-		// "context deadline exceeded" before the run itself actually
-		// failed. Give it real headroom above the longest normal tool
-		// call instead. A real agentic turn (many sequential tool calls,
-		// each its own model round trip) can run for minutes, not
-		// seconds -- see internal/adkgateway/backend.go's
-		// serverWriteTimeout for the matching fix on the local ADK REST
-		// server's own http.Server.WriteTimeout (bumped from its 15s
-		// default to 10m, after that exact default caused this same
-		// failure mode against a real long OpenRouter-driven turn: the
-		// connection died mid-handler, and the gateway saw it as a bare
-		// EOF). Botson-TUI's own NATS request timeout
-		// (adkclient.WithTimeout in its internal/natsapi/client.go, and
-		// runTurnCmd's per-call ctx in internal/tui/cmds.go) must stay
-		// above this value too, or one of those becomes the new
-		// bottleneck.
+	srv, err := api.New(api.Config{
+		Host:      host,
+		Port:      port,
+		AuthToken: boot.Config.ApiAuthToken,
+		ADK:       *boot.Launcher,
+		// Give it real headroom above the longest normal tool call: a real
+		// agentic turn (many sequential tool calls, each its own model
+		// round trip) can run for minutes, not seconds -- see
+		// internal/networking/api/adkbackend.go's serverWriteTimeout doc
+		// comment for the matching fix on the local ADK REST server's own
+		// http.Server.WriteTimeout.
 		RequestTimeout: 8 * time.Minute,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to configure the ADK NATS gateway: %w", err)
+		return fmt.Errorf("failed to configure the API server: %w", err)
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return gw.Run(gctx) })
-	g.Go(func() error { return natsapi.Serve(gctx, nc, boot.Launcher) })
-	g.Go(func() error { return automode.Run(gctx, nc, boot.Launcher) })
+	g.Go(func() error { return srv.Run(gctx) })
+	g.Go(func() error {
+		return automode.Run(gctx, fmt.Sprintf("http://127.0.0.1:%d", port), boot.Config.ApiAuthToken, boot.Launcher)
+	})
 	if err := g.Wait(); err != nil {
 		return fmt.Errorf("core server execution failed: %w", err)
 	}

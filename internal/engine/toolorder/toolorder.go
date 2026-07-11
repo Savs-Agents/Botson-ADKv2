@@ -59,7 +59,7 @@
 // confirmations (Botson-TUI does this in its confirmation queue). A gated
 // call in the same spot is left alone -- its own tool.Run pauses it with a
 // real, human-facing confirmation -- which is why New takes the
-// requiresConfirmation predicate (wired to internal/agent's registry).
+// requiresConfirmation predicate (wired to internal/engine/agent's registry).
 package toolorder
 
 import (
@@ -87,7 +87,7 @@ type orderPlugin struct {
 
 // New returns the ToolOrderPlugin, ready to add to a runner.PluginConfig.
 // requiresConfirmation reports whether the named tool is built with
-// RequireConfirmation: true (wire it to internal/agent.RequiresConfirmation);
+// RequireConfirmation: true (wire it to internal/engine/agent.RequiresConfirmation);
 // nil is treated as "no tool is gated".
 func New(requiresConfirmation func(toolName string) bool) *plugin.Plugin {
 	op := &orderPlugin{requiresConfirmation: requiresConfirmation}

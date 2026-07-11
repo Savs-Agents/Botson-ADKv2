@@ -6,33 +6,37 @@
 // Botson-TUI already gives instantly for a human, just running unattended
 // inside the core process as a fallback once nothing is connected to do it.
 //
-// This is deliberately built as one more NATS client of the standard adk.*
-// run surface (via NATS-ADK-Proxy's own public client package) rather than
-// by modifying NATS-ADK-Proxy or the ADK module: neither owns a hook for "a
-// turn just paused for confirmation," and NATS-ADK-Proxy's own request
-// handling internals aren't importable from here (they live under its own
-// internal/ package tree, which Go's visibility rules block across module
-// boundaries). Polling the shared session service directly for pending
-// confirmations, then re-issuing the run call exactly like a human-driven
-// client would, needs no changes to either dependency.
+// This is deliberately built as one more HTTP client of Botson's own public
+// API (internal/apiserver), calling POST /api/run over loopback with the
+// same bearer token any external consumer would use, rather than reaching
+// into the in-process Runner/session state directly -- there's no hook
+// anywhere (ADK's own module, or Botson's) for "a turn just paused for
+// confirmation," so polling the shared session service directly for
+// pending confirmations, then re-issuing the run call exactly like a
+// human-driven client would, is the same approach either way. Going
+// through the real HTTP surface additionally means this code path is
+// continuously exercised by the core's own background worker, not just by
+// external consumers.
 package automode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
-
-	adkclient "github.com/Savs-Agents/NATS-ADK-Proxy/client"
-	"github.com/nats-io/nats.go"
 
 	"google.golang.org/adk/v2/cmd/launcher"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
+	"google.golang.org/genai"
 
 	"botson/internal/management"
+	"botson/internal/networking/adkwire"
 )
 
 // pollInterval bounds how long a pending confirmation can sit unanswered
@@ -51,13 +55,19 @@ const maxConsecutiveApprovals = 25
 
 // Run polls every session known to cfg's agent loader, auto-answering any
 // confirmation left pending on a session flagged for auto mode, until ctx
-// is done.
-func Run(ctx context.Context, nc *nats.Conn, cfg *launcher.Config) error {
+// is done. baseURL is Botson's own HTTP API server's loopback address (e.g.
+// "http://127.0.0.1:4222") -- always loopback regardless of what interface
+// the server is actually bound to, since this worker runs in-process on the
+// same machine. authToken is the same bearer token any external consumer
+// authenticates with.
+func Run(ctx context.Context, baseURL, authToken string, cfg *launcher.Config) error {
 	w := &worker{
-		cfg:    cfg,
-		client: adkclient.New(nc, adkclient.WithTimeout(30*time.Second)),
-		streak: make(map[string]int),
-		wasOn:  make(map[string]bool),
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    strings.TrimSuffix(baseURL, "/"),
+		authToken:  authToken,
+		streak:     make(map[string]int),
+		wasOn:      make(map[string]bool),
 	}
 
 	ticker := time.NewTicker(pollInterval)
@@ -73,8 +83,10 @@ func Run(ctx context.Context, nc *nats.Conn, cfg *launcher.Config) error {
 }
 
 type worker struct {
-	cfg    *launcher.Config
-	client *adkclient.Client
+	cfg        *launcher.Config
+	httpClient *http.Client
+	baseURL    string
+	authToken  string
 
 	mu     sync.Mutex
 	streak map[string]int  // sessionKey -> auto-approvals given since auto mode was last (re-)enabled
@@ -188,44 +200,15 @@ func pendingConfirmations(sess session.Session) []string {
 	return pending
 }
 
-// The types below mirror the JSON shapes ADK's REST API actually expects on
-// POST /api/run (see google.golang.org/adk/v2/server/adkrest, whose own
-// request/response models live under an internal/ package this module can't
-// import across module boundaries) -- verified against Botson-TUI's own
-// hand-rolled mirror (internal/natsapi/wire.go there), itself checked
-// against a real persisted session. Kept minimal: only the fields this
-// package actually sends.
-type runAgentRequest struct {
-	AppName    string      `json:"appName"`
-	UserID     string      `json:"userId"`
-	SessionID  string      `json:"sessionId"`
-	NewMessage wireContent `json:"newMessage"`
-}
-
-type wireContent struct {
-	Role  string     `json:"role,omitempty"`
-	Parts []wirePart `json:"parts"`
-}
-
-type wirePart struct {
-	FunctionResponse *wireFunctionResponse `json:"functionResponse,omitempty"`
-}
-
-type wireFunctionResponse struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Response map[string]any `json:"response,omitempty"`
-}
-
 // autoApprove sends one run turn answering every pending confirmation id at
 // once (ADK expects a batch answered together -- see AGENTS.md), marking
 // each response with botsonAutoMode so any client rendering this session's
 // history later can tell this apart from a human's own approval.
 func (w *worker) autoApprove(ctx context.Context, sess session.Session, pending []string) error {
-	parts := make([]wirePart, 0, len(pending))
+	parts := make([]*genai.Part, 0, len(pending))
 	for _, id := range pending {
-		parts = append(parts, wirePart{
-			FunctionResponse: &wireFunctionResponse{
+		parts = append(parts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
 				ID:   id,
 				Name: toolconfirmation.FunctionCallName,
 				Response: map[string]any{
@@ -236,23 +219,32 @@ func (w *worker) autoApprove(ctx context.Context, sess session.Session, pending 
 		})
 	}
 
-	body, err := json.Marshal(runAgentRequest{
+	body, err := json.Marshal(adkwire.RunAgentRequest{
 		AppName:    sess.AppName(),
 		UserID:     sess.UserID(),
 		SessionID:  sess.ID(),
-		NewMessage: wireContent{Role: "user", Parts: parts},
+		NewMessage: genai.Content{Role: "user", Parts: parts},
 	})
 	if err != nil {
 		return err
 	}
 
-	header := http.Header{"Content-Type": []string{"application/json"}}
-	resp, err := w.client.Do(ctx, http.MethodPost, "/api/run", header, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.baseURL+"/api/run", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	if resp.Status < 200 || resp.Status >= 300 {
-		return fmt.Errorf("automode: run request failed: status %d: %s", resp.Status, string(resp.Body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+w.authToken)
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("automode: run request failed: status %d: %s", resp.StatusCode, respBody)
 	}
 	return nil
 }
