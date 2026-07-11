@@ -25,8 +25,11 @@ var globalKeys = globalKeyMap{
 	TabStats:    key.NewBinding(key.WithKeys("f5"), key.WithHelp("f5", "stats")),
 }
 
+// ShortHelp only shows Quit -- the F1-F5 tab bindings are shown inline in
+// the tab bar itself (see view.go's renderTabBar) rather than duplicated
+// in the footer.
 func (k globalKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.TabChat, k.TabSessions, k.TabAgents, k.TabSettings, k.TabStats, k.Quit}
+	return []key.Binding{k.Quit}
 }
 
 // chatKeyMap is Chat tab-specific; enter/y/n/esc are handled directly by
@@ -35,6 +38,7 @@ func (k globalKeyMap) ShortHelp() []key.Binding {
 // of truth for key matching.
 type chatKeyMap struct {
 	Send           key.Binding
+	Scroll         key.Binding
 	NewSession     key.Binding
 	ToggleAutoMode key.Binding
 	Approve        key.Binding
@@ -43,6 +47,7 @@ type chatKeyMap struct {
 
 var chatKeys = chatKeyMap{
 	Send:           key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
+	Scroll:         key.NewBinding(key.WithKeys("pgup", "pgdown"), key.WithHelp("pgup/pgdn", "scroll")),
 	NewSession:     key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new session")),
 	ToggleAutoMode: key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "toggle auto-mode")),
 	Approve:        key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "approve")),
@@ -50,7 +55,7 @@ var chatKeys = chatKeyMap{
 }
 
 func (k chatKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Send, k.NewSession, k.ToggleAutoMode}
+	return []key.Binding{k.Send, k.Scroll, k.NewSession, k.ToggleAutoMode}
 }
 
 // sessionsKeyMap is the Sessions tab's own bindings.

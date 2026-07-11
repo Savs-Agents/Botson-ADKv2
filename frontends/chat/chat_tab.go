@@ -318,7 +318,40 @@ func (m chatTabModel) Update(msg tea.Msg) (chatTabModel, tea.Cmd) {
 	return m, nil
 }
 
+// scrollKeys are checked first, ahead of the pending-confirmation and
+// waiting guards below, so the transcript can be scrolled at any time --
+// including while a turn is in flight or a confirmation is pending, both
+// reasonable times to want to scroll back up and re-read context. These
+// are deliberately a narrow, hand-picked set (not viewport's own
+// DefaultKeyMap, which binds plain letters like "j"/"k"/"f"/"b"/"u"/"d"
+// and the arrow keys -- exactly the keys the textinput below needs for
+// normal typing and cursor movement) so scrolling can never eat a
+// keystroke meant for the input.
+func (m *chatTabModel) handleScrollKey(key string) bool {
+	switch key {
+	case "pgup":
+		m.viewport.PageUp()
+	case "pgdown":
+		m.viewport.PageDown()
+	case "ctrl+u":
+		m.viewport.HalfPageUp()
+	case "ctrl+d":
+		m.viewport.HalfPageDown()
+	case "home":
+		m.viewport.GotoTop()
+	case "end":
+		m.viewport.GotoBottom()
+	default:
+		return false
+	}
+	return true
+}
+
 func (m chatTabModel) handleKey(msg tea.KeyMsg) (chatTabModel, tea.Cmd) {
+	if m.handleScrollKey(msg.String()) {
+		return m, nil
+	}
+
 	if m.pending != nil {
 		switch strings.ToLower(msg.String()) {
 		case "y":

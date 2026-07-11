@@ -306,6 +306,62 @@ func TestChatTab_SwitchSessionMsgTriggersLoad(t *testing.T) {
 	}
 }
 
+func TestChatTab_ScrollKeysMoveViewportNotInput(t *testing.T) {
+	m := readyChatTab(t)
+	for i := 0; i < 100; i++ {
+		m.history = append(m.history, "line")
+	}
+	m.viewport.SetContent(strings.Join(m.history, "\n"))
+	m.viewport.GotoTop()
+
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+
+	if cmd != nil {
+		t.Error("expected no cmd for a local scroll")
+	}
+	if mm.viewport.YOffset == 0 {
+		t.Error("expected pgdown to move the viewport down from the top")
+	}
+	if mm.input.Value() != "" {
+		t.Errorf("expected pgdown to never reach the input, got input value %q", mm.input.Value())
+	}
+
+	mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if mm.viewport.YOffset != 0 {
+		t.Errorf("expected pgup to scroll back to the top, YOffset = %d", mm.viewport.YOffset)
+	}
+
+	mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if !mm.viewport.AtBottom() {
+		t.Error("expected end to jump to the bottom")
+	}
+
+	mm, _ = mm.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if !mm.viewport.AtTop() {
+		t.Error("expected home to jump to the top")
+	}
+}
+
+func TestChatTab_ScrollKeysWorkWhilePendingOrWaiting(t *testing.T) {
+	m := readyChatTab(t)
+	for i := 0; i < 100; i++ {
+		m.history = append(m.history, "line")
+	}
+	m.viewport.SetContent(strings.Join(m.history, "\n"))
+	m.viewport.GotoTop()
+	m.waiting = true
+	m.pending = &pendingConfirmation{callID: "c1", hint: "x"}
+
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+
+	if mm.viewport.YOffset == 0 {
+		t.Error("expected scrolling to work even while a turn is in flight and a confirmation is pending")
+	}
+	if !mm.waiting || mm.pending == nil {
+		t.Error("expected scrolling to leave waiting/pending state untouched")
+	}
+}
+
 func TestChatTab_CtrlAToggleAutoModeSetsWaiting(t *testing.T) {
 	m := readyChatTab(t)
 

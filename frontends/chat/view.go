@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -29,6 +30,11 @@ func (m model) View() string {
 	return m.renderTabBar() + "\n" + body + "\n" + m.help.View(m.activeHelpKeyMap())
 }
 
+// renderTabBar shows each tab's own F-key hint directly on its label
+// (e.g. "F1 Chat") instead of leaving that mapping only in the footer --
+// relies on tabID's declaration order in model.go lining up with
+// globalKeys' F1-F5 bindings (tabChat=0 -> F1, tabSessions=1 -> F2, ...),
+// the same order globalKeys itself is defined in.
 func (m model) renderTabBar() string {
 	var b strings.Builder
 	for t := tabID(0); t < tabID(len(tabNames)); t++ {
@@ -36,7 +42,8 @@ func (m model) renderTabBar() string {
 		if t == m.activeTab {
 			style = activeTabStyle
 		}
-		b.WriteString(style.Render(tabNames[t]))
+		label := fmt.Sprintf("F%d %s", t+1, tabNames[t])
+		b.WriteString(style.Render(label))
 	}
 	return tabBarStyle.Width(m.width).Render(b.String())
 }
