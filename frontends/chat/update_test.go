@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -359,6 +360,40 @@ func TestChatTab_ScrollKeysWorkWhilePendingOrWaiting(t *testing.T) {
 	}
 	if !mm.waiting || mm.pending == nil {
 		t.Error("expected scrolling to leave waiting/pending state untouched")
+	}
+}
+
+func TestChatTab_ViewNeverExceedsSetHeight(t *testing.T) {
+	const height = 24
+
+	tests := []struct {
+		name  string
+		setup func(*chatTabModel)
+	}{
+		{"normal", func(m *chatTabModel) {}},
+		{"long error", func(m *chatTabModel) {
+			m.err = fmt.Errorf("%s", strings.Repeat("x", 500))
+		}},
+		{"long pending hint", func(m *chatTabModel) {
+			m.pending = &pendingConfirmation{callID: "c1", hint: strings.Repeat("y", 500)}
+		}},
+		{"long agent name with badges", func(m *chatTabModel) {
+			m.agent = strings.Repeat("Really Long Agent Name ", 5)
+			m.autoMode = true
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newChatTab(context.Background(), newClient("http://example.invalid", "tok"), "Agent Botson", "chat-alice", "sess-1")
+			m.SetSize(80, height)
+			tt.setup(&m)
+
+			lines := strings.Count(m.View(), "\n") + 1
+			if lines > height {
+				t.Errorf("View() rendered %d lines, want <= %d (the terminal height SetSize was given) -- content must truncate, not wrap, or it overflows the tab's fixed height budget", lines, height)
+			}
+		})
 	}
 }
 

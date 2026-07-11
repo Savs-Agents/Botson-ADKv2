@@ -61,6 +61,8 @@ type chatTabModel struct {
 	input    textinput.Model
 	spinner  spinner.Model
 
+	width int // full content width, for the status bar/input box's own borders
+
 	ready   bool // SetSize has been called at least once
 	waiting bool // a turn (or other async action) is in flight
 	pending *pendingConfirmation
@@ -93,17 +95,26 @@ func (m chatTabModel) Init() tea.Cmd {
 	return tea.Batch(textinput.Blink, m.spinner.Tick)
 }
 
-// SetSize lays out the viewport/input for the given content area (root
-// already subtracts its own tab-bar/help-bar chrome before calling this).
+// SetSize lays out the status bar/viewport/input box for the given
+// content area (root already subtracts its own tab-bar/help-bar chrome
+// before calling this). statusBarHeight/inputBoxHeight must match what
+// View() actually renders exactly -- both are fixed regardless of
+// content (see statusLine/inputBoxContent, which truncate rather than
+// wrap so their content is always exactly one line), so the viewport
+// gets a precise, never-overflowing remainder rather than an estimate.
 func (m *chatTabModel) SetSize(width, height int) {
-	const statusHeight, footerHeight = 1, 1
+	m.width = width
+	const statusBarHeight = 2 // 1 content line + 1 bottom border
+	const inputBoxHeight = 3  // 1 top border + 1 content line + 1 bottom border
+	viewportHeight := max(height-statusBarHeight-inputBoxHeight, 0)
+
 	if !m.ready {
-		m.viewport = viewport.New(width, height-statusHeight-footerHeight)
+		m.viewport = viewport.New(width, viewportHeight)
 		m.viewport.SetContent(strings.Join(m.history, "\n"))
 		m.ready = true
 	} else {
 		m.viewport.Width = width
-		m.viewport.Height = height - statusHeight - footerHeight
+		m.viewport.Height = viewportHeight
 	}
 	m.input.Width = width - 2
 }
@@ -396,38 +407,48 @@ func (m chatTabModel) handleKey(msg tea.KeyMsg) (chatTabModel, tea.Cmd) {
 	return m, cmd
 }
 
-func (m chatTabModel) View() string {
-	if !m.ready {
-		return "initializing...\n"
-	}
-
-	var footer string
-	switch {
-	case m.pending != nil:
-		footer = promptStyle.Render(fmt.Sprintf("%s [y/n] ", m.pending.hint))
-	case m.waiting:
-		footer = m.spinner.View() + " thinking..."
-	default:
-		footer = m.input.View()
-	}
-
-	var errLine string
+// statusLine is the top bar's content: active agent, session id, and
+// mode badges -- or the last error, if there is one, in the same slot
+// (rather than an extra line) so the tab's height budget never varies
+// with whether an error happens to be showing. Always truncated to
+// m.width -- see SetSize's doc comment for why that matters here.
+func (m chatTabModel) statusLine() string {
 	if m.err != nil {
-		errLine = errStyle.Render("error: "+m.err.Error()) + "\n"
+		return truncateToWidth(errStyle.Render("error: "+m.err.Error()), m.width)
 	}
 
-	status := fmt.Sprintf("— %s (%s) —", m.agent, m.sessionID)
+	status := fmt.Sprintf("%s (%s)", m.agent, m.sessionID)
 	if !m.sessionCreated {
 		status += " " + dimStyle.Render("[not saved yet]")
 	}
 	if m.autoMode {
 		status += " " + successStyle.Render("[auto-mode]")
 	}
+	return truncateToWidth(dimStyle.Render(status), m.width)
+}
 
-	return fmt.Sprintf("%s\n%s%s\n%s",
-		m.viewport.View(),
-		errLine,
-		dimStyle.Render(status),
-		footer,
-	)
+// inputBoxContent is the bottom box's content: the live input, a
+// thinking spinner, or a pending confirmation's y/n prompt. hint text
+// comes from the server (a tool's confirmation message) and isn't
+// length-bounded, so it's truncated the same way statusLine is.
+func (m chatTabModel) inputBoxContent() string {
+	switch {
+	case m.pending != nil:
+		return truncateToWidth(promptStyle.Render(fmt.Sprintf("%s [y/n] ", m.pending.hint)), m.width)
+	case m.waiting:
+		return m.spinner.View() + " thinking..."
+	default:
+		return m.input.View()
+	}
+}
+
+func (m chatTabModel) View() string {
+	if !m.ready {
+		return "initializing...\n"
+	}
+
+	statusBar := chatStatusBarStyle.Width(m.width).Render(m.statusLine())
+	inputBox := chatInputBoxStyle.Width(m.width).Render(m.inputBoxContent())
+
+	return fmt.Sprintf("%s\n%s\n%s", statusBar, m.viewport.View(), inputBox)
 }
