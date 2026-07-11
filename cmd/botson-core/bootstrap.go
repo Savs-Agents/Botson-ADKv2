@@ -18,17 +18,18 @@ import (
 	"google.golang.org/adk/v2/runner"
 )
 
-// appBoot bundles the shared services every subcommand needs: the loaded
-// configuration and a launcher.Config wired up with the agent registry,
-// session service, and artifact service.
+// appBoot bundles the loaded configuration and a launcher.Config wired up
+// with the agent registry, session service, and artifact service -- the
+// full agent runtime, needed only by `botson core` itself.
 type appBoot struct {
 	Config   *config.AppConfig
 	Launcher *launcher.Config
 }
 
-// setupApp loads configuration and constructs the shared agent/session/
-// artifact wiring used by every subcommand (tui, web, discord), so the
-// dispatcher only has to build it once regardless of which one runs.
+// setupApp loads configuration and constructs the agent/session/artifact
+// wiring the core needs to actually run the agent runtime. Subcommands
+// that only manage the core's process lifecycle, or act as a pure API
+// client (chat), skip this via PersistentPreRunE: noBootstrap.
 func setupApp(ctx context.Context) (*appBoot, error) {
 	appConfig, err := config.Load()
 	if err != nil {

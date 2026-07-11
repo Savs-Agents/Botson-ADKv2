@@ -162,7 +162,7 @@ type writeFileArgsLike struct {
 // (*genai.Schema) field toTools originally read -- so every tool's
 // "parameters" sent to OpenRouter was silently the empty-object fallback,
 // regardless of the tool's real arguments. This builds a tool exactly the
-// way internal/agent/registry.go does and checks the real declaration
+// way internal/engine/agent/registry.go does and checks the real declaration
 // toTools produces actually names its arguments.
 func TestToTools_UsesParametersJsonSchema(t *testing.T) {
 	tl, err := functiontool.New(functiontool.Config{

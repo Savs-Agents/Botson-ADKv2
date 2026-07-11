@@ -21,7 +21,7 @@ func SetWorkspaceRoot(root string) {
 
 // cwdStateKey is the reserved session-state key a consumer sets via
 // stateDelta on POST /api/run to override the working directory for a
-// session -- see docs/nats-api.md. Unlike WorkspaceRoot, an override is
+// session -- see docs/api.md. Unlike WorkspaceRoot, an override is
 // not sandboxed to any particular root: it may be any absolute path the
 // core process can read/write. That trade (flexibility over a path jail)
 // is why Botson's HTTP API requires a bearer auth token

@@ -12,11 +12,11 @@ import (
 
 // AutoModeStateKey is the flat session-state key that turns "auto mode" on
 // for one session -- a durable, per-session flag internal/automode's
-// background worker polls for, and Botson-TUI reads back from
-// SessionsGet's State map to know whether to auto-answer confirmations
+// background worker polls for, and a connected chat client reads back from
+// GetSession's State map to know whether to auto-answer confirmations
 // itself while connected. Flat (not nested in a map), same convention as
 // "botson:cwd" and "botson:tools:read:<path>" -- see
-// internal/tools/read_tracking.go for why flat keys survive the JSON
+// internal/engine/tools/read_tracking.go for why flat keys survive the JSON
 // round-trip on reload where a nested map value wouldn't.
 const AutoModeStateKey = "botson:autoMode"
 

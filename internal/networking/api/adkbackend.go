@@ -60,7 +60,7 @@ type backend struct {
 // is picked freely/never advertised, but it is not itself network-isolated
 // by ADK; this package's own bearer-token auth (auth.go) in front of the
 // reverse proxy (adkreverseproxy.go) is what actually gates real traffic,
-// not this bind behavior. See docs/process-architecture.md for the
+// not this bind behavior. See AGENTS.md's "Architecture" section for the
 // accepted residual risk this leaves (anything that can already reach the
 // host machine can still reach this backend's port directly,
 // unauthenticated).

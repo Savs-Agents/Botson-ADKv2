@@ -89,8 +89,9 @@ func (c *client) CreateSession(ctx context.Context, agent, user, sessionID strin
 	return nil
 }
 
-// RunTurn sends one turn and returns the full batch of events it produced
-// (there is no streaming yet -- see docs/process-architecture.md).
+// RunTurn sends one turn and returns the full batch of events it produced.
+// This client doesn't use the streaming routes (run_sse/run_live) -- see
+// docs/api.md's note on them -- it waits for the whole turn instead.
 func (c *client) RunTurn(ctx context.Context, req adkwire.RunAgentRequest) ([]adkwire.Event, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
