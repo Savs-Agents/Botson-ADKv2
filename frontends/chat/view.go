@@ -1,41 +1,62 @@
 package chat
 
 import (
-	"fmt"
+	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-	dimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 )
 
 func (m model) View() string {
-	if !m.ready {
+	if m.width == 0 {
 		return "initializing...\n"
 	}
 
-	var footer string
-	switch {
-	case m.pending != nil:
-		footer = promptStyle.Render(fmt.Sprintf("%s [y/n] ", m.pending.hint))
-	case m.waiting:
-		footer = m.spinner.View() + " thinking..."
-	default:
-		footer = m.input.View()
+	var body string
+	switch m.activeTab {
+	case tabChat:
+		body = m.chatTab.View()
+	case tabSessions:
+		body = m.sessionsTab.View()
+	case tabAgents:
+		body = m.agentsTab.View()
+	case tabSettings:
+		body = m.settingsTab.View()
+	case tabStats:
+		body = m.statsTab.View()
 	}
 
-	var errLine string
-	if m.err != nil {
-		errLine = errStyle.Render("error: "+m.err.Error()) + "\n"
-	}
+	return m.renderTabBar() + "\n" + body + "\n" + m.help.View(m.activeHelpKeyMap())
+}
 
-	return fmt.Sprintf("%s\n%s%s\n%s",
-		m.viewport.View(),
-		errLine,
-		dimStyle.Render(fmt.Sprintf("— %s (%s) —", m.agent, m.sessionID)),
-		footer,
-	)
+func (m model) renderTabBar() string {
+	var b strings.Builder
+	for t := tabID(0); t < tabID(len(tabNames)); t++ {
+		style := inactiveTabStyle
+		if t == m.activeTab {
+			style = activeTabStyle
+		}
+		b.WriteString(style.Render(tabNames[t]))
+	}
+	return tabBarStyle.Width(m.width).Render(b.String())
+}
+
+// activeHelpKeyMap concatenates the always-present global bindings with
+// whichever tab is currently active, so the footer shows exactly the
+// keys that do something right now.
+func (m model) activeHelpKeyMap() help.KeyMap {
+	var tabHelp []key.Binding
+	switch m.activeTab {
+	case tabChat:
+		tabHelp = chatKeys.ShortHelp()
+	case tabSessions:
+		tabHelp = sessionsKeys.ShortHelp()
+	case tabAgents:
+		tabHelp = agentsKeys.ShortHelp()
+	case tabSettings:
+		tabHelp = settingsKeys.ShortHelp()
+	case tabStats:
+		tabHelp = statsKeys.ShortHelp()
+	}
+	return keyMapList(append(globalKeys.ShortHelp(), tabHelp...))
 }

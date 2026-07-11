@@ -73,6 +73,135 @@ func (c *client) Reachable(ctx context.Context) error {
 	return nil
 }
 
+// doJSON is the shared request/response plumbing every /botson/* method
+// below uses: JSON-encode body (nil for no body), check the status code,
+// and JSON-decode the reply into out (nil to just discard it after
+// checking status) -- one place for this instead of each new method
+// re-deriving its own status-check/body-read logic the way
+// CreateSession/RunTurn (predating this helper) each do individually.
+func (c *client) doJSON(ctx context.Context, method, path string, body, out any) error {
+	var reqBody []byte
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("chat: marshal %s %s request: %w", method, path, err)
+		}
+		reqBody = b
+	}
+
+	resp, err := c.do(ctx, method, path, reqBody)
+	if err != nil {
+		return fmt.Errorf("chat: %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("chat: read %s %s response: %w", method, path, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("chat: %s %s failed: status %d: %s", method, path, resp.StatusCode, respBody)
+	}
+	if out != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("chat: unmarshal %s %s response: %w", method, path, err)
+		}
+	}
+	return nil
+}
+
+// ListSessions returns dashboard-shaped session summaries, most-recently-
+// updated first, optionally narrowed by agent and/or user (empty string
+// means "no filter" for that field).
+func (c *client) ListSessions(ctx context.Context, agentFilter, userFilter string) ([]sessionStat, error) {
+	q := url.Values{}
+	if agentFilter != "" {
+		q.Set("agent", agentFilter)
+	}
+	if userFilter != "" {
+		q.Set("user", userFilter)
+	}
+	path := "/botson/sessions"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	var stats []sessionStat
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &stats); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+// GetSession returns one session's full detail (state + event history) by
+// its composite key.
+func (c *client) GetSession(ctx context.Context, agent, user, sessionID string) (*sessionDetail, error) {
+	path := "/botson/sessions/" + url.PathEscape(agent) + "/" + url.PathEscape(user) + "/" + url.PathEscape(sessionID)
+	var detail sessionDetail
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &detail); err != nil {
+		return nil, err
+	}
+	return &detail, nil
+}
+
+// DeleteSession removes a session by its composite key.
+func (c *client) DeleteSession(ctx context.Context, agent, user, sessionID string) error {
+	path := "/botson/sessions/" + url.PathEscape(agent) + "/" + url.PathEscape(user) + "/" + url.PathEscape(sessionID)
+	return c.doJSON(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// SetSessionAutoMode toggles a session's auto-mode flag -- see AGENTS.md's
+// "HITL confirmation wire protocol" §5's "Auto mode".
+func (c *client) SetSessionAutoMode(ctx context.Context, agent, user, sessionID string, enabled bool) error {
+	path := "/botson/sessions/" + url.PathEscape(agent) + "/" + url.PathEscape(user) + "/" + url.PathEscape(sessionID) + "/autoMode"
+	return c.doJSON(ctx, http.MethodPatch, path, sessionsSetAutoModeRequest{Enabled: enabled}, nil)
+}
+
+// ListAgents returns every loaded agent (bundled defaults plus custom user
+// agents).
+func (c *client) ListAgents(ctx context.Context) ([]agentDetail, error) {
+	var details []agentDetail
+	if err := c.doJSON(ctx, http.MethodGet, "/botson/agents", nil, &details); err != nil {
+		return nil, err
+	}
+	return details, nil
+}
+
+// DeleteAgent removes a custom user agent. Bundled defaults can't be
+// deleted (management.ErrAgentNotFound comes back as a 404).
+func (c *client) DeleteAgent(ctx context.Context, name string) error {
+	return c.doJSON(ctx, http.MethodDelete, "/botson/agents/"+url.PathEscape(name), nil, nil)
+}
+
+// GetSettings returns the core's current (secret-masked) settings.
+func (c *client) GetSettings(ctx context.Context) (*settingsPayload, error) {
+	var s settingsPayload
+	if err := c.doJSON(ctx, http.MethodGet, "/botson/settings", nil, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateSettings applies patch (only its non-nil fields) and returns the
+// resulting settings, including a Note if a restart-required field
+// (model/provider) changed.
+func (c *client) UpdateSettings(ctx context.Context, patch settingsPatch) (*settingsPayload, error) {
+	var s settingsPayload
+	if err := c.doJSON(ctx, http.MethodPatch, "/botson/settings", patch, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// GetDashboardStats returns the aggregated system snapshot (totals,
+// per-agent counts, recent sessions).
+func (c *client) GetDashboardStats(ctx context.Context) (*dashboardStats, error) {
+	var stats dashboardStats
+	if err := c.doJSON(ctx, http.MethodGet, "/botson/dashboard/stats", nil, &stats); err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
 // CreateSession creates a new, empty session under the given composite key.
 func (c *client) CreateSession(ctx context.Context, agent, user, sessionID string) error {
 	path := "/api/apps/" + url.PathEscape(agent) + "/users/" + url.PathEscape(user) + "/sessions/" + url.PathEscape(sessionID)

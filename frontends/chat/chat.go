@@ -60,7 +60,13 @@ func Run(ctx context.Context, cfg *config.AppConfig, agentOverride string) error
 	}
 
 	m := newModel(ctx, c, agent, userID, sessionID)
-	p := tea.NewProgram(m, tea.WithContext(ctx))
+	// WithAltScreen: the dashboard is a fixed-size, multi-tab layout, not a
+	// scrolling transcript -- without it, a tab whose rendered content is
+	// even one line taller than the terminal (easy to hit across five
+	// differently-shaped tabs) causes the terminal's own native scrolling,
+	// which fights Bubble Tea's in-place repaint and can scroll the tab bar
+	// itself out of view.
+	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithAltScreen())
 	_, err = p.Run()
 	return err
 }

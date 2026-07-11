@@ -9,23 +9,21 @@ import (
 	"botson/internal/networking/adkwire"
 )
 
-func readyModel(t *testing.T) model {
+func readyChatTab(t *testing.T) chatTabModel {
 	t.Helper()
-	m := newModel(context.Background(), newClient("http://example.invalid", "tok"), "Agent Botson", "chat-alice", "sess-1")
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	mm := updated.(model)
-	if !mm.ready {
-		t.Fatal("model did not become ready after a WindowSizeMsg")
+	m := newChatTab(context.Background(), newClient("http://example.invalid", "tok"), "Agent Botson", "chat-alice", "sess-1")
+	m.SetSize(80, 24)
+	if !m.ready {
+		t.Fatal("chat tab did not become ready after SetSize")
 	}
-	return mm
+	return m
 }
 
-func TestUpdate_EnterSubmitsMessageAndSetsWaiting(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_EnterSubmitsMessageAndSetsWaiting(t *testing.T) {
+	m := readyChatTab(t)
 	m.input.SetValue("hello")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if !mm.waiting {
 		t.Error("expected waiting=true after submitting a message")
@@ -41,11 +39,10 @@ func TestUpdate_EnterSubmitsMessageAndSetsWaiting(t *testing.T) {
 	}
 }
 
-func TestUpdate_EnterWithEmptyInputDoesNothing(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_EnterWithEmptyInputDoesNothing(t *testing.T) {
+	m := readyChatTab(t)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if mm.waiting {
 		t.Error("expected waiting to remain false for an empty submission")
@@ -55,12 +52,11 @@ func TestUpdate_EnterWithEmptyInputDoesNothing(t *testing.T) {
 	}
 }
 
-func TestUpdate_WaitingSwallowsInput(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_WaitingSwallowsInput(t *testing.T) {
+	m := readyChatTab(t)
 	m.waiting = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 
 	if mm.input.Value() != "" {
 		t.Errorf("expected input to stay empty while waiting, got %q", mm.input.Value())
@@ -70,12 +66,11 @@ func TestUpdate_WaitingSwallowsInput(t *testing.T) {
 	}
 }
 
-func TestUpdate_PendingConfirmation_YConfirms(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_PendingConfirmation_YConfirms(t *testing.T) {
+	m := readyChatTab(t)
 	m.pending = &pendingConfirmation{callID: "c1", hint: "Approve?"}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 
 	if mm.pending != nil {
 		t.Error("expected pending to be cleared after y")
@@ -88,12 +83,11 @@ func TestUpdate_PendingConfirmation_YConfirms(t *testing.T) {
 	}
 }
 
-func TestUpdate_PendingConfirmation_NRejects(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_PendingConfirmation_NRejects(t *testing.T) {
+	m := readyChatTab(t)
 	m.pending = &pendingConfirmation{callID: "c1", hint: "Approve?"}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
 
 	if mm.pending != nil {
 		t.Error("expected pending to be cleared after n")
@@ -106,12 +100,11 @@ func TestUpdate_PendingConfirmation_NRejects(t *testing.T) {
 	}
 }
 
-func TestUpdate_PendingConfirmation_OtherKeysIgnored(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_PendingConfirmation_OtherKeysIgnored(t *testing.T) {
+	m := readyChatTab(t)
 	m.pending = &pendingConfirmation{callID: "c1", hint: "Approve?"}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	mm := updated.(model)
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if mm.pending == nil {
 		t.Error("expected pending to remain set for a non-y/n key")
@@ -124,26 +117,24 @@ func TestUpdate_PendingConfirmation_OtherKeysIgnored(t *testing.T) {
 	}
 }
 
-func TestUpdate_TurnResultRendersAndClearsWaiting(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_TurnResultRendersAndClearsWaiting(t *testing.T) {
+	m := readyChatTab(t)
 	m.waiting = true
 
-	updated, _ := m.Update(turnResultMsg{events: []adkwire.Event{
+	mm, _ := m.Update(turnResultMsg{events: []adkwire.Event{
 		{Author: "Agent Botson", Content: nil},
 	}})
-	mm := updated.(model)
 
 	if mm.waiting {
 		t.Error("expected waiting=false after a turn result")
 	}
 }
 
-func TestUpdate_TurnResultError(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_TurnResultError(t *testing.T) {
+	m := readyChatTab(t)
 	m.waiting = true
 
-	updated, _ := m.Update(turnResultMsg{err: context.DeadlineExceeded})
-	mm := updated.(model)
+	mm, _ := m.Update(turnResultMsg{err: context.DeadlineExceeded})
 
 	if mm.waiting {
 		t.Error("expected waiting=false even on error")
@@ -153,15 +144,81 @@ func TestUpdate_TurnResultError(t *testing.T) {
 	}
 }
 
-func TestUpdate_CtrlCQuits(t *testing.T) {
-	m := readyModel(t)
+func TestChatTab_NewSessionMsgSwitchesSession(t *testing.T) {
+	m := readyChatTab(t)
+	m.waiting = true
+	m.pending = &pendingConfirmation{callID: "c1", hint: "x"}
+	m.history = []string{"you: hi"}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	if cmd == nil {
-		t.Fatal("expected a non-nil cmd for ctrl+c")
+	mm, _ := m.Update(newSessionMsg{agent: "Agent Botson", user: "chat-alice", sessionID: "sess-2"})
+
+	if mm.waiting {
+		t.Error("expected waiting=false after newSessionMsg")
 	}
-	msg := cmd()
-	if _, ok := msg.(tea.QuitMsg); !ok {
-		t.Errorf("expected tea.QuitMsg, got %T", msg)
+	if mm.pending != nil {
+		t.Error("expected pending to be cleared after newSessionMsg")
+	}
+	if mm.sessionID != "sess-2" {
+		t.Errorf("sessionID = %q, want sess-2", mm.sessionID)
+	}
+	if len(mm.history) != 0 {
+		t.Errorf("expected history to be reset, got %v", mm.history)
+	}
+}
+
+func TestChatTab_SessionLoadedMsgReplaysHistoryAndAutoMode(t *testing.T) {
+	m := readyChatTab(t)
+	m.waiting = true
+
+	mm, _ := m.Update(sessionLoadedMsg{
+		agent: "Agent Botson", user: "chat-bob", sessionID: "sess-9",
+		detail: &sessionDetail{
+			State: map[string]any{"botson:autoMode": true},
+			Events: []sessionEventSummary{
+				{Author: "chat-bob", Text: "hi"},
+				{Author: "Agent Botson", Text: "hello"},
+				{Author: "system", Text: ""}, // empty text is skipped
+			},
+		},
+	})
+
+	if mm.waiting {
+		t.Error("expected waiting=false after sessionLoadedMsg")
+	}
+	if mm.agent != "Agent Botson" || mm.user != "chat-bob" || mm.sessionID != "sess-9" {
+		t.Errorf("identity = %+v, want Agent Botson/chat-bob/sess-9", mm)
+	}
+	if !mm.autoMode {
+		t.Error("expected autoMode=true from session state")
+	}
+	want := []string{"chat-bob: hi", "Agent Botson: hello"}
+	if len(mm.history) != len(want) || mm.history[0] != want[0] || mm.history[1] != want[1] {
+		t.Errorf("history = %v, want %v", mm.history, want)
+	}
+}
+
+func TestChatTab_SwitchSessionMsgTriggersLoad(t *testing.T) {
+	m := readyChatTab(t)
+
+	mm, cmd := m.Update(switchSessionMsg{agent: "Agent Botson", user: "chat-alice", sessionID: "sess-3"})
+
+	if !mm.waiting {
+		t.Error("expected waiting=true while the session loads")
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil cmd to fetch the session")
+	}
+}
+
+func TestChatTab_CtrlAToggleAutoModeSetsWaiting(t *testing.T) {
+	m := readyChatTab(t)
+
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+
+	if !mm.waiting {
+		t.Error("expected waiting=true while the toggle is in flight")
+	}
+	if cmd == nil {
+		t.Error("expected a non-nil cmd to send the toggle")
 	}
 }
